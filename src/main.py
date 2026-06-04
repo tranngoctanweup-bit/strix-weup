@@ -851,8 +851,8 @@ async def install_tool(
         cmd = """
         ARCH=$(dpkg --print-architecture) &&
         if [ "$ARCH" = "arm64" ]; then TRIVY_ARCH="ARM64"; else TRIVY_ARCH="64bit"; fi &&
-        VERSION=$(wget -qO- https://api.github.com/repos/aquasecurity/trivy/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "0.71.0") &&
-        wget -qO /tmp/trivy.deb "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-${TRIVY_ARCH}.deb" &&
+        VERSION=$(curl -fsSL https://api.github.com/repos/aquasecurity/trivy/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "0.71.0") &&
+        curl -fsSL -o /tmp/trivy.deb "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-${TRIVY_ARCH}.deb" &&
         dpkg -i /tmp/trivy.deb && rm /tmp/trivy.deb
         """
     else:
@@ -860,8 +860,8 @@ async def install_tool(
         cmd = f"""
         ARCH=$(dpkg --print-architecture) &&
         if [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi &&
-        VERSION=$(wget -qO- https://api.github.com/repos/{repo}/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "latest") &&
-        wget -qO /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${{VERSION}}/{binary}_linux_${{GOARCH}}.zip" &&
+        VERSION=$(curl -fsSL https://api.github.com/repos/{repo}/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "latest") &&
+        curl -fsSL -o /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${{VERSION}}/{binary}_linux_${{GOARCH}}.zip" &&
         unzip -o /tmp/{binary}.zip -d /tmp && mv /tmp/{binary} /usr/local/bin/{binary} && chmod +x /usr/local/bin/{binary} && rm -f /tmp/{binary}.zip
         """
     
