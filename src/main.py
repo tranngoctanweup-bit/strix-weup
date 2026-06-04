@@ -768,6 +768,56 @@ async def delete_schedule(schedule_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Schedule deleted"}
 
+# Settings endpoints
+@app.get("/api/settings/api-keys")
+async def get_api_keys_status():
+    """Get status of configured API keys (never return actual keys)"""
+    keys = {
+        "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
+        "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
+        "ANTHROPIC_API_KEY": bool(os.getenv("ANTHROPIC_API_KEY")),
+        "GROQ_API_KEY": bool(os.getenv("GROQ_API_KEY")),
+        "MISTRAL_API_KEY": bool(os.getenv("MISTRAL_API_KEY")),
+        "GITHUB_TOKEN": bool(os.getenv("GITHUB_TOKEN")),
+    }
+    return keys
+
+@app.post("/api/settings/api-key")
+async def update_api_key(request: dict):
+    """Update an API key in .env file"""
+    provider = request.get("provider")
+    key = request.get("key")
+    if not provider or not key:
+        raise HTTPException(status_code=400, detail="Provider and key are required")
+    
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    
+    # Read existing .env
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            lines = f.readlines()
+    
+    # Update or add key
+    found = False
+    for i, line in enumerate(lines):
+        if line.startswith(f"{provider}="):
+            lines[i] = f"{provider}={key}\n"
+            found = True
+            break
+    
+    if not found:
+        lines.append(f"{provider}={key}\n")
+    
+    # Write back
+    with open(env_path, 'w') as f:
+        f.writelines(lines)
+    
+    # Update runtime env
+    os.environ[provider] = key
+    
+    return {"message": f"{provider} updated successfully"}
+
 # Health check
 @app.get("/health")
 async def health():

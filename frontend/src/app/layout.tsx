@@ -2,11 +2,17 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "Strix Pro - AI-Powered Security Platform",
-  description: "Advanced penetration testing and vulnerability management platform",
+  title: "Strix Pro — AI-Powered Security Platform",
+  description: "Advanced penetration testing, vulnerability management, and AI-driven security analysis platform",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
@@ -16,8 +22,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={inter.className}>
-        <div className="min-h-screen bg-background">
+      <body className={`${inter.className} antialiased`}>
+        <div className="min-h-screen bg-[#0a0a0f] noise-bg">
           {children}
         </div>
       </body>
