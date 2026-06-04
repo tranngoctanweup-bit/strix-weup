@@ -7,6 +7,7 @@ import os
 import sys
 import json
 import asyncio
+import subprocess as sp
 from datetime import datetime
 from typing import List, Optional, Dict
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depe
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from dotenv import load_dotenv
 
 # Load environment
@@ -839,6 +841,16 @@ async def dashboard_stats(
     critical_vulns = db.query(Vulnerability).filter(Vulnerability.severity == SeverityLevel.CRITICAL.value).count()
     high_vulns = db.query(Vulnerability).filter(Vulnerability.severity == SeverityLevel.HIGH.value).count()
     
+    # Source code scanning stats
+    total_source_scans = db.query(SourceCodeScan).count()
+    source_scans_running = db.query(SourceCodeScan).filter(SourceCodeScan.status == "running").count()
+    source_scans_completed = db.query(SourceCodeScan).filter(SourceCodeScan.status == "completed").count()
+    source_findings_critical = db.query(func.sum(SourceCodeScan.critical_count)).scalar() or 0
+    source_findings_high = db.query(func.sum(SourceCodeScan.high_count)).scalar() or 0
+    source_findings_medium = db.query(func.sum(SourceCodeScan.medium_count)).scalar() or 0
+    source_findings_low = db.query(func.sum(SourceCodeScan.low_count)).scalar() or 0
+    source_findings_total = db.query(func.sum(SourceCodeScan.findings_count)).scalar() or 0
+    
     return {
         "targets": total_targets,
         "scans": {
@@ -851,6 +863,18 @@ async def dashboard_stats(
             "total": total_vulns,
             "critical": critical_vulns,
             "high": high_vulns
+        },
+        "source_scans": {
+            "total": total_source_scans,
+            "running": source_scans_running,
+            "completed": source_scans_completed,
+            "findings": {
+                "total": source_findings_total,
+                "critical": source_findings_critical,
+                "high": source_findings_high,
+                "medium": source_findings_medium,
+                "low": source_findings_low,
+            }
         }
     }
 

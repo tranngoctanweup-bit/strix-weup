@@ -80,6 +80,18 @@ interface DashboardStats {
     critical: number;
     high: number;
   };
+  source_scans: {
+    total: number;
+    running: number;
+    completed: number;
+    findings: {
+      total: number;
+      critical: number;
+      high: number;
+      medium: number;
+      low: number;
+    };
+  };
 }
 
 interface Target {
@@ -683,6 +695,16 @@ export default function Dashboard() {
                   <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
                     <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">PRs Reviewed</div>
                     <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">0</div>
+                  </div>
+                  {/* Source Code Findings */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 cursor-pointer hover:border-indigo-500/30 transition-all" onClick={() => setActiveTab("source-code")}>
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">SAST Findings</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">{stats?.source_scans?.findings?.total || 0}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {(stats?.source_scans?.findings?.critical || 0) > 0 && <span className="text-[10px] text-red-400">{stats?.source_scans?.findings?.critical} crit</span>}
+                      {(stats?.source_scans?.findings?.high || 0) > 0 && <span className="text-[10px] text-orange-400">{stats?.source_scans?.findings?.high} high</span>}
+                      <span className="text-[10px] text-[#71717a]">{stats?.source_scans?.total || 0} scans</span>
+                    </div>
                   </div>
                 </div>
 
