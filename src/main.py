@@ -861,7 +861,7 @@ async def install_tool(
         ARCH=$(dpkg --print-architecture) &&
         if [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi &&
         VERSION=$(wget -qO- https://api.github.com/repos/{repo}/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "latest") &&
-        wget -qO /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${VERSION}/{binary}_linux_${{GOARCH}}.zip" &&
+        wget -qO /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${{VERSION}}/{binary}_linux_${{GOARCH}}.zip" &&
         unzip -o /tmp/{binary}.zip -d /tmp && mv /tmp/{binary} /usr/local/bin/{binary} && chmod +x /usr/local/bin/{binary} && rm -f /tmp/{binary}.zip
         """
     
