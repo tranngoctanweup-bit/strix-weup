@@ -324,12 +324,12 @@ async def create_scan_endpoint(
     
     # Execute scan in background
     asyncio.create_task(
-        execute_scan(scan.id, target.host, request.scan_type, request.tool, request.auto_save)
+        execute_scan(scan.id, target.id, target.host, request.scan_type, request.tool, request.auto_save)
     )
     
     return scan
 
-async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = None, auto_save: bool = False):
+async def execute_scan(scan_id: int, target_id: int, target: str, scan_type: str, tool: str = None, auto_save: bool = False):
     """Execute scan in background"""
     from src.db.models import SessionLocal
     db = SessionLocal()
@@ -365,6 +365,8 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
                     all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\nERROR: {str(e)}")
             
             combined_output = "\n\n".join(all_outputs)
+            # Parse findings from output
+            parse_scan_findings(db, scan_id, target_id, combined_output, target)
             ai_summary = await get_ai_summary(combined_output, "full_scan", target)
             update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=combined_output, ai_summary=ai_summary)
             await broadcast({
@@ -407,6 +409,8 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
             result = await asyncio.to_thread(tool_engine.execute, tool_name, args, auto_save)
             
             if result.success:
+                # Parse findings from output
+                parse_scan_findings(db, scan_id, target_id, result.output or "", target)
                 ai_summary = await get_ai_summary(result.output, scan_type, target)
                 update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=result.output, ai_summary=ai_summary)
                 await broadcast({
@@ -424,6 +428,107 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
         await broadcast({"type": "scan_error", "scan_id": scan_id, "error": str(e)})
     finally:
         db.close()
+
+def parse_scan_findings(db, scan_id: int, target_id: int, output: str, target: str):
+    """Parse scan output and create Vulnerability records for findings"""
+    import re
+    
+    if not output:
+        return
+    
+    findings = []
+    
+    # Parse nuclei output — format: [severity] [template-id] [protocol] [name] [url]
+    for match in re.finditer(r'\[(\w+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]*)\]', output):
+        severity_raw, template_id, protocol, name, url = match.groups()
+        severity_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
+        severity = severity_map.get(severity_raw.lower(), "info")
+        findings.append({
+            "title": f"[Nuclei] {name}",
+            "description": f"Template: {template_id}\nProtocol: {protocol}\nURL: {url}",
+            "severity": severity,
+            "affected_component": url or target,
+            "cve_id": template_id if "cve-" in template_id.lower() else None,
+        })
+    
+    # Parse nuclei output — simpler format: [severity] [template-id] [name] url
+    for match in re.finditer(r'\[(\w+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(\S+)', output):
+        if match.group(2) not in [f.get("cve_id", "") for f in findings]:  # dedup
+            severity_raw = match.group(1)
+            template_id = match.group(2)
+            name = match.group(3)
+            url = match.group(4)
+            severity_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
+            severity = severity_map.get(severity_raw.lower(), "info")
+            findings.append({
+                "title": f"[Nuclei] {name}",
+                "description": f"Template: {template_id}\nURL: {url}",
+                "severity": severity,
+                "affected_component": url,
+                "cve_id": template_id if "cve-" in template_id.lower() else None,
+            })
+    
+    # Parse nmap output — open ports
+    for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)\s*(.*)', output):
+        port, service, version = match.groups()
+        findings.append({
+            "title": f"Open Port: {port}/tcp ({service})",
+            "description": f"Port {port}/tcp is open running {service} {version}".strip(),
+            "severity": "info",
+            "affected_component": f"{target}:{port}",
+        })
+    
+    # Parse subfinder output — subdomains (count as info findings)
+    subdomains = []
+    in_subfinder = False
+    for line in output.split('\n'):
+        if 'SUBFINDER' in line or 'SUBDOMAIN' in line:
+            in_subfinder = True
+            continue
+        if in_subfinder and line.strip() and not line.startswith('═'):
+            if '.' in line and not line.startswith('['):
+                subdomains.append(line.strip())
+        elif line.startswith('═') and in_subfinder:
+            in_subfinder = False
+    
+    if subdomains:
+        findings.append({
+            "title": f"Subdomain Enumeration: {len(subdomains)} subdomains found",
+            "description": "Discovered subdomains:\n" + "\n".join(subdomains[:20]),
+            "severity": "info",
+            "affected_component": target,
+        })
+    
+    # Parse httpx output — web technologies
+    for line in output.split('\n'):
+        if '[WEB_PROBE]' in line or 'httpx' in line.lower():
+            continue
+        # httpx output format: url [status-code] [title] [tech]
+        tech_match = re.match(r'(https?://\S+)\s+\[(\d+)\]\s+\[([^\]]*)\]\s*(.*)', line)
+        if tech_match:
+            url, status, title, tech = tech_match.groups()
+            findings.append({
+                "title": f"Web Service: {url} (HTTP {status})",
+                "description": f"Title: {title}\nTechnologies: {tech}".strip(),
+                "severity": "info",
+                "affected_component": url,
+            })
+    
+    # Store findings
+    for f in findings:
+        try:
+            create_vulnerability(
+                db, target_id=target_id, scan_id=scan_id,
+                title=f["title"], severity=f["severity"],
+                description=f.get("description"),
+                affected_component=f.get("affected_component"),
+                cve_id=f.get("cve_id"),
+            )
+        except Exception as e:
+            log_error(f"Failed to store finding: {e}", source="scanner", component="parser")
+    
+    log_info(f"Parsed {len(findings)} findings from scan {scan_id}", source="scanner", component="parser")
+
 
 async def get_ai_summary(output: str, scan_type: str, target: str) -> str:
     """Get AI summary of scan results"""
