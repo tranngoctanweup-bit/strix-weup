@@ -1123,9 +1123,20 @@ export default function Dashboard() {
                           </td>
                           <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
                           <td className="px-5 py-3">
-                            <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
-                              View
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+                                View
+                              </button>
+                              {(scan.status === "completed" || scan.status === "failed") && canScan && (
+                                <button
+                                  onClick={() => startScan(scan.target_id, scan.scan_type)}
+                                  className="text-[12px] text-emerald-400 hover:text-emerald-300 transition-colors font-medium flex items-center gap-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  Retest
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
