@@ -81,7 +81,7 @@ class LogStore:
                     source=source.lower(),
                     component=component,
                     message=message,
-                    metadata=metadata or {},
+                    extra_metadata=metadata or {},
                     labels=labels or {},
                     raw=raw,
                 )
@@ -147,7 +147,7 @@ class LogStore:
                         "message": l.message,
                         "source": l.source,
                         "component": l.component or "",
-                        "metadata": l.metadata or {},
+                        "metadata": l.extra_metadata or {},
                         "labels": l.labels or {},
                     }
                     for l in q.all()

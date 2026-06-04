@@ -335,7 +335,7 @@ class Log(Base):
     source = Column(String(50), default="system", index=True)  # backend, frontend, scanner, system, loki
     component = Column(String(100), default="")  # http, auth, scanner, etc.
     message = Column(Text, nullable=False)
-    metadata = Column(JSON, default=dict)  # extra fields from Loki
+    extra_metadata = Column("metadata", JSON, default=dict)  # extra fields from Loki
     labels = Column(JSON, default=dict)  # Loki labels (job, instance, etc.)
     raw = Column(Text)  # raw Loki payload for debugging
     
