@@ -1711,7 +1711,7 @@ export default function Dashboard() {
       )}
 
       {/* ─── Scan Detail Modal ────────────────────────────────────────── */}
-      {scanDetail && <ScanDetailModal scan={scanDetail} onClose={() => setScanDetail(null)} />}
+      {scanDetail && <ScanDetailModal scan={scanDetail} onClose={() => setScanDetail(null)} authFetch={authFetch} />}
 
       {/* ─── Toast Notifications ──────────────────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
@@ -2114,16 +2114,15 @@ function NewPentestModal({
   );
 }
 
-function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void }) {
+function ScanDetailModal({ scan, onClose, authFetch }: { scan: Scan; onClose: () => void; authFetch: (url: string, options?: RequestInit) => Promise<Response> }) {
   const [creatingIssues, setCreatingIssues] = useState(false);
   const [issuesCreated, setIssuesCreated] = useState<number | null>(null);
 
   const handleCreateIssues = async () => {
     setCreatingIssues(true);
     try {
-      const res = await fetch(`${API_URL}/api/scans/${scan.id}/extract-issues`, {
+      const res = await authFetch(`${API_URL}/api/scans/${scan.id}/extract-issues`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       });
       if (res.ok) {
         const data = await res.json();
