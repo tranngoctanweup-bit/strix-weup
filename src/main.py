@@ -842,18 +842,18 @@ async def install_tool(
     if install_method == "git":
         # Nikto - clone from git
         cmd = f"""
-        git clone --depth 1 https://github.com/{repo}.git /opt/nikto 2>/dev/null || true &&
-        ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto &&
+        git clone --depth 1 https://github.com/{repo}.git /home/strix/.strix/nikto 2>/dev/null || true &&
+        ln -sf /home/strix/.strix/nikto/program/nikto.pl /usr/local/bin/nikto &&
         chmod +x /usr/local/bin/nikto
         """
     elif install_method == "deb":
-        # Trivy - install via .deb
+        # Trivy - download binary directly (no dpkg needed)
         cmd = """
         ARCH=$(dpkg --print-architecture) &&
         if [ "$ARCH" = "arm64" ]; then TRIVY_ARCH="ARM64"; else TRIVY_ARCH="64bit"; fi &&
         VERSION=$(curl -fsSL https://api.github.com/repos/aquasecurity/trivy/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "0.71.0") &&
-        curl -fsSL -o /tmp/trivy.deb "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-${TRIVY_ARCH}.deb" &&
-        dpkg -i /tmp/trivy.deb && rm /tmp/trivy.deb
+        curl -fsSL -o /tmp/trivy.tar.gz "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-${TRIVY_ARCH}.tar.gz" &&
+        tar xzf /tmp/trivy.tar.gz -C /tmp trivy && mv /tmp/trivy /usr/local/bin/trivy && chmod +x /usr/local/bin/trivy && rm -f /tmp/trivy.tar.gz
         """
     else:
         # Go-based tools (nuclei, subfinder, httpx) - download zip
@@ -861,7 +861,7 @@ async def install_tool(
         ARCH=$(dpkg --print-architecture) &&
         if [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi &&
         VERSION=$(curl -fsSL https://api.github.com/repos/{repo}/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "latest") &&
-        curl -fsSL -o /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${{VERSION}}/{binary}_linux_${{GOARCH}}.zip" &&
+        curl -fsSL -o /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${{VERSION}}/{binary}_${{VERSION}}_linux_${{GOARCH}}.zip" &&
         unzip -o /tmp/{binary}.zip -d /tmp && mv /tmp/{binary} /usr/local/bin/{binary} && chmod +x /usr/local/bin/{binary} && rm -f /tmp/{binary}.zip
         """
     

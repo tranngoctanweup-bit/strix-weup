@@ -48,7 +48,8 @@ COPY .env.example ./.env.example
 # Create non-root user
 RUN groupadd -r strix && useradd -r -g strix -d /app -s /sbin/nologin strix \
     && mkdir -p /app/reports /app/data/reports /home/strix/.strix \
-    && chown -R strix:strix /app /home/strix/.strix
+    && chown -R strix:strix /app /home/strix/.strix \
+    && chmod 777 /usr/local/bin
 
 USER strix
 
