@@ -1859,6 +1859,7 @@ function ScanModal({
   const [selected, setSelected] = useState("port_scan");
 
   const scanTypes = [
+    { id: "full_scan", label: "Full Scan", desc: "Comprehensive scan — ports, subdomains, web, vulnerabilities", icon: Radar, color: "text-indigo-400" },
     { id: "port_scan", label: "Port Scan", desc: "Discover open ports and services", icon: Wifi, color: "text-blue-400" },
     { id: "subdomain", label: "Subdomain Scan", desc: "Enumerate subdomains", icon: Globe, color: "text-purple-400" },
     { id: "web_scan", label: "Web Scan", desc: "Analyze web application", icon: Eye, color: "text-green-400" },
@@ -1930,6 +1931,7 @@ function NewPentestModal({
   const [selectedScan, setSelectedScan] = useState("vulnerability");
 
   const scanTypes = [
+    { id: "full_scan", label: "Full Scan", desc: "Comprehensive scan — ports, subdomains, web, vulnerabilities", icon: Radar, color: "text-indigo-400" },
     { id: "vulnerability", label: "Vulnerability Scan", desc: "Detect known vulnerabilities", icon: Bug, color: "text-red-400" },
     { id: "port_scan", label: "Port Scan", desc: "Discover open ports and services", icon: Wifi, color: "text-blue-400" },
     { id: "subdomain", label: "Subdomain Scan", desc: "Enumerate subdomains", icon: Globe, color: "text-purple-400" },

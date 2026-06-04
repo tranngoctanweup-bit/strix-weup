@@ -339,43 +339,62 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
         update_scan_status(db, scan_id, ScanStatus.RUNNING.value)
         await broadcast({"type": "scan_status", "scan_id": scan_id, "status": "running"})
         
-        # Determine tool and args
-        if tool:
-            tool_name = tool
-        else:
-            tool_map = {
-                "port_scan": "nmap",
-                "subdomain": "subfinder",
-                "web_scan": "nikto",
-                "vulnerability": "nuclei"
-            }
-            tool_name = tool_map.get(scan_type, "nmap")
-        
-        # Build args
-        args = {"target": target, "domain": target, "url": f"http://{target}"}
-        
-        # Execute
-        result = tool_engine.execute(tool_name, args, auto_save)
-        
-        if result.success:
-            # Get AI summary
-            ai_summary = await get_ai_summary(result.output, scan_type, target)
+        # Full scan runs all tools sequentially
+        if scan_type == "full_scan":
+            tools_to_run = [
+                ("nmap", {"target": target, "flags": "-sV -sC -p-"}, "port_scan"),
+                ("subfinder", {"domain": target, "target": target}, "subdomain"),
+                ("httpx", {"target": target, "url": f"http://{target}"}, "web_probe"),
+                ("nuclei", {"target": target, "url": f"http://{target}"}, "vulnerability"),
+            ]
+            all_outputs = []
+            for tool_name, args, label in tools_to_run:
+                log_info(f"Full scan [{scan_id}]: running {label} ({tool_name})", source="scanner", component="full-scan")
+                try:
+                    result = tool_engine.execute(tool_name, args, auto_save)
+                    if result.output:
+                        all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\n{result.output}")
+                except Exception as e:
+                    all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\nERROR: {str(e)}")
             
-            update_scan_status(
-                db, scan_id,
-                ScanStatus.COMPLETED.value,
-                output=result.output,
-                ai_summary=ai_summary
-            )
+            combined_output = "\n\n".join(all_outputs)
+            ai_summary = await get_ai_summary(combined_output, "full_scan", target)
+            update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=combined_output, ai_summary=ai_summary)
             await broadcast({
                 "type": "scan_complete",
                 "scan_id": scan_id,
                 "status": "completed",
-                "output": result.output[:500]  # Truncate for broadcast
+                "output": combined_output[:500]
             })
+        
         else:
-            update_scan_status(db, scan_id, ScanStatus.FAILED.value, error=result.error)
-            await broadcast({"type": "scan_error", "scan_id": scan_id, "error": result.error})
+            # Single tool scan
+            if tool:
+                tool_name = tool
+            else:
+                tool_map = {
+                    "port_scan": "nmap",
+                    "subdomain": "subfinder",
+                    "web_scan": "nikto",
+                    "vulnerability": "nuclei"
+                }
+                tool_name = tool_map.get(scan_type, "nmap")
+            
+            args = {"target": target, "domain": target, "url": f"http://{target}"}
+            result = tool_engine.execute(tool_name, args, auto_save)
+            
+            if result.success:
+                ai_summary = await get_ai_summary(result.output, scan_type, target)
+                update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=result.output, ai_summary=ai_summary)
+                await broadcast({
+                    "type": "scan_complete",
+                    "scan_id": scan_id,
+                    "status": "completed",
+                    "output": result.output[:500]
+                })
+            else:
+                update_scan_status(db, scan_id, ScanStatus.FAILED.value, error=result.error)
+                await broadcast({"type": "scan_error", "scan_id": scan_id, "error": result.error})
     
     except Exception as e:
         update_scan_status(db, scan_id, ScanStatus.FAILED.value, error=str(e))
