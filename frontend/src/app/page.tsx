@@ -295,6 +295,7 @@ export default function Dashboard() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showAddTarget, setShowAddTarget] = useState(false);
   const [showScanModal, setShowScanModal] = useState<{ targetId: number; targetName: string } | null>(null);
+  const [showNewPentest, setShowNewPentest] = useState(false);
   const [scanDetail, setScanDetail] = useState<Scan | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
@@ -639,7 +640,7 @@ export default function Dashboard() {
                     </div>
                     {canScan && (
                       <button
-                        onClick={() => setShowAddTarget(true)}
+                        onClick={() => setShowNewPentest(true)}
                         className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -852,12 +853,50 @@ export default function Dashboard() {
                     <h3 className="text-sm font-semibold text-[#e4e4e7]">Pentest History</h3>
                     <p className="text-[12px] text-[#71717a] mt-0.5">{scans.length} pentests recorded</p>
                   </div>
+                  {canScan && (
+                    <button
+                      onClick={() => {
+                        if (targets.length === 0) {
+                          addToast("Add a target first before running a pentest", "error");
+                          setActiveTab("domains");
+                        } else {
+                          setShowNewPentest(true);
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      New Pentest
+                    </button>
+                  )}
                 </div>
+
+                {/* Pentest stats row */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                    <div className="text-[11px] text-[#71717a] uppercase tracking-wider mb-1">Total</div>
+                    <div className="text-xl font-bold text-[#e4e4e7]">{scans.length}</div>
+                  </div>
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                    <div className="text-[11px] text-[#71717a] uppercase tracking-wider mb-1">Running</div>
+                    <div className="text-xl font-bold text-blue-400">{scans.filter(s => s.status === "running").length}</div>
+                  </div>
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                    <div className="text-[11px] text-[#71717a] uppercase tracking-wider mb-1">Completed</div>
+                    <div className="text-xl font-bold text-green-400">{scans.filter(s => s.status === "completed").length}</div>
+                  </div>
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                    <div className="text-[11px] text-[#71717a] uppercase tracking-wider mb-1">Failed</div>
+                    <div className="text-xl font-bold text-red-400">{scans.filter(s => s.status === "failed").length}</div>
+                  </div>
+                </div>
+
                 <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-white/[0.06]">
                         <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">ID</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Target</th>
                         <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Type</th>
                         <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Tool</th>
                         <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Status</th>
@@ -866,27 +905,68 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
-                      {scans.map((scan) => (
-                        <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
-                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
-                          <td className="px-5 py-3">
-                            <span className="text-[13px] text-[#e4e4e7] font-medium">{scan.scan_type}</span>
-                          </td>
-                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">{scan.tool || "auto"}</td>
-                          <td className="px-5 py-3">
-                            <StatusBadge status={scan.status} />
-                          </td>
-                          <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
-                          <td className="px-5 py-3">
-                            <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {scans.map((scan) => {
+                        const target = targets.find(t => t.id === scan.target_id);
+                        return (
+                          <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
+                            <td className="px-5 py-3">
+                              <div>
+                                <p className="text-[13px] text-[#e4e4e7] font-medium">{target?.name || `Target #${scan.target_id}`}</p>
+                                <p className="text-[11px] text-[#71717a] font-mono">{target?.host || ""}</p>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3">
+                              <span className="text-[13px] text-[#e4e4e7] font-medium">{scan.scan_type}</span>
+                            </td>
+                            <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">{scan.tool || "auto"}</td>
+                            <td className="px-5 py-3">
+                              <StatusBadge status={scan.status} />
+                            </td>
+                            <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
+                            <td className="px-5 py-3">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+                                  View
+                                </button>
+                                {scan.status === "running" && canScan && (
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await authFetch(`${API_URL}/api/scans/${scan.id}/cancel`, { method: "POST" });
+                                        if (res.ok) { fetchData(); addToast("Scan cancelled", "info"); }
+                                      } catch { addToast("Failed to cancel scan", "error"); }
+                                    }}
+                                    className="text-[12px] text-red-400 hover:text-red-300 transition-colors font-medium"
+                                  >
+                                    Cancel
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
-                  {scans.length === 0 && <EmptyStateLarge icon={Search} title="No pentests yet" message="Start a pentest from the dashboard or targets page" />}
+                  {scans.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4">
+                        <Search className="w-6 h-6 text-[#71717a]" />
+                      </div>
+                      <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No pentests yet</p>
+                      <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Add a target and run your first pentest to discover vulnerabilities</p>
+                      {canScan && (
+                        <button
+                          onClick={() => { setActiveTab("domains"); }}
+                          className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20"
+                        >
+                          <Globe className="w-3.5 h-3.5" />
+                          Add a Target First
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1082,7 +1162,126 @@ export default function Dashboard() {
             {/* ─── Domains Tab ─────────────────────────────────────── */}
             {activeTab === "domains" && (
               <div className="space-y-4">
-                <EmptyStateLarge icon={Globe} title="Add domains to monitor" message="Add your domains to continuously monitor for security issues, certificate changes, and DNS modifications" />
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#e4e4e7]">Domains & Targets</h3>
+                    <p className="text-[12px] text-[#71717a] mt-0.5">{targets.length} targets configured</p>
+                  </div>
+                  {canEdit && (
+                    <button
+                      onClick={() => setShowAddTarget(true)}
+                      className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Target
+                    </button>
+                  )}
+                </div>
+
+                {/* Target cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {targets.map((target) => {
+                    const targetScans = scans.filter(s => s.target_id === target.id);
+                    const lastScan = targetScans[0];
+                    const targetVulns = vulns.filter(v => targetScans.some(s => s.id === v.scan_id));
+                    const typeIcons: Record<string, { icon: any; color: string }> = {
+                      domain: { icon: Globe, color: "text-blue-400" },
+                      ip: { icon: Server, color: "text-green-400" },
+                      url: { icon: Globe, color: "text-purple-400" },
+                    };
+                    const t = typeIcons[target.type] || typeIcons.domain;
+                    return (
+                      <div key={target.id} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] transition-all duration-200">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-md bg-white/[0.04]">
+                              <t.icon className={`w-4 h-4 ${t.color}`} />
+                            </div>
+                            <div className="min-w-0">
+                              <h4 className="text-[13px] font-semibold text-[#e4e4e7] truncate">{target.name}</h4>
+                              <p className="text-[11px] text-[#71717a] truncate font-mono">{target.host}</p>
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">
+                            {target.type}
+                          </span>
+                        </div>
+
+                        <p className="text-[12px] text-[#71717a] mb-3 line-clamp-2">
+                          {target.description || "No description"}
+                        </p>
+
+                        {/* Scan & vuln stats */}
+                        <div className="flex items-center gap-3 mb-3">
+                          <span className="text-[11px] text-[#71717a]">
+                            <span className="text-[#e4e4e7] font-medium">{targetScans.length}</span> scans
+                          </span>
+                          {targetVulns.length > 0 && (
+                            <span className="text-[11px] text-[#71717a]">
+                              <span className="text-red-400 font-medium">{targetVulns.filter(v => v.severity === "critical").length}</span> critical
+                            </span>
+                          )}
+                          {lastScan && (
+                            <StatusBadge status={lastScan.status} />
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-[#71717a]">
+                            Added {new Date(target.created_at).toLocaleDateString()}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {canScan && (
+                              <button
+                                onClick={() => setShowScanModal({ targetId: target.id, targetName: target.name })}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all duration-200"
+                              >
+                                <Play className="w-3 h-3" />
+                                Scan
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Delete target "${target.name}"?`)) return;
+                                  try {
+                                    const res = await authFetch(`${API_URL}/api/targets/${target.id}`, { method: "DELETE" });
+                                    if (res.ok) { fetchData(); addToast(`Target "${target.name}" deleted`, "success"); }
+                                    else { addToast("Failed to delete target", "error"); }
+                                  } catch { addToast("Failed to delete target", "error"); }
+                                }}
+                                className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                                title="Delete target"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {targets.length === 0 && (
+                    <div className="col-span-full">
+                      <div className="flex flex-col items-center justify-center py-16 text-center">
+                        <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4">
+                          <Globe className="w-6 h-6 text-[#71717a]" />
+                        </div>
+                        <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No targets configured</p>
+                        <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Add a domain, IP, or URL to start monitoring for security issues</p>
+                        {canEdit && (
+                          <button
+                            onClick={() => setShowAddTarget(true)}
+                            className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Your First Target
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1352,6 +1551,22 @@ export default function Dashboard() {
           targetName={showScanModal.targetName}
           onClose={() => setShowScanModal(null)}
           onStart={(type) => startScan(showScanModal.targetId, type)}
+        />
+      )}
+
+      {/* ─── New Pentest Modal (target + scan type selector) ─────────── */}
+      {showNewPentest && (
+        <NewPentestModal
+          targets={targets}
+          onClose={() => setShowNewPentest(false)}
+          onStart={(targetId, scanType) => {
+            setShowNewPentest(false);
+            startScan(targetId, scanType);
+          }}
+          onAddTarget={() => {
+            setShowNewPentest(false);
+            setShowAddTarget(true);
+          }}
         />
       )}
 
@@ -1631,6 +1846,125 @@ function ScanModal({
           <button onClick={() => onStart(selected)} className="flex items-center gap-2 px-3.5 py-2 rounded-md text-[13px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
             <Play className="w-3.5 h-3.5" />
             Start Scan
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewPentestModal({
+  targets,
+  onClose,
+  onStart,
+  onAddTarget,
+}: {
+  targets: Target[];
+  onClose: () => void;
+  onStart: (targetId: number, scanType: string) => void;
+  onAddTarget: () => void;
+}) {
+  const [selectedTarget, setSelectedTarget] = useState<number | null>(targets.length > 0 ? targets[0].id : null);
+  const [selectedScan, setSelectedScan] = useState("vulnerability");
+
+  const scanTypes = [
+    { id: "vulnerability", label: "Vulnerability Scan", desc: "Detect known vulnerabilities", icon: Bug, color: "text-red-400" },
+    { id: "port_scan", label: "Port Scan", desc: "Discover open ports and services", icon: Wifi, color: "text-blue-400" },
+    { id: "subdomain", label: "Subdomain Scan", desc: "Enumerate subdomains", icon: Globe, color: "text-purple-400" },
+    { id: "web_scan", label: "Web Scan", desc: "Analyze web application security", icon: Eye, color: "text-green-400" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay" onClick={onClose}>
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-lg mx-4 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
+          <div>
+            <h3 className="text-sm font-semibold text-[#e4e4e7]">New Pentest</h3>
+            <p className="text-[11px] text-[#71717a] mt-0.5">Select a target and scan type to begin</p>
+          </div>
+          <button onClick={onClose} className="text-[#71717a] hover:text-[#e4e4e7] transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Target selector */}
+          <div>
+            <label className="block text-[11px] font-medium text-[#71717a] uppercase tracking-wider mb-2">Select Target</label>
+            {targets.length > 0 ? (
+              <div className="space-y-1.5 max-h-32 overflow-auto">
+                {targets.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedTarget(t.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-md border transition-all duration-150 text-left ${
+                      selectedTarget === t.id
+                        ? "bg-indigo-500/10 border-indigo-500/30"
+                        : "bg-white/[0.02] border-white/[0.06] hover:border-white/[0.1]"
+                    }`}
+                  >
+                    <Globe className={`w-4 h-4 shrink-0 ${selectedTarget === t.id ? "text-indigo-400" : "text-[#71717a]"}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[13px] font-medium truncate ${selectedTarget === t.id ? "text-indigo-400" : "text-[#e4e4e7]"}`}>{t.name}</p>
+                      <p className="text-[11px] text-[#71717a] truncate font-mono">{t.host}</p>
+                    </div>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${selectedTarget === t.id ? "border-indigo-400" : "border-white/20"}`}>
+                      {selectedTarget === t.id && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-[13px] text-[#71717a] mb-2">No targets configured</p>
+                <button onClick={onAddTarget} className="text-[12px] text-indigo-400 hover:text-indigo-300 font-medium">
+                  + Add a target first
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Scan type selector */}
+          <div>
+            <label className="block text-[11px] font-medium text-[#71717a] uppercase tracking-wider mb-2">Scan Type</label>
+            <div className="space-y-1.5">
+              {scanTypes.map((st) => (
+                <button
+                  key={st.id}
+                  onClick={() => setSelectedScan(st.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md border transition-all duration-150 text-left ${
+                    selectedScan === st.id
+                      ? "bg-indigo-500/10 border-indigo-500/30"
+                      : "bg-white/[0.02] border-white/[0.06] hover:border-white/[0.1]"
+                  }`}
+                >
+                  <div className={`p-1.5 rounded-md ${selectedScan === st.id ? "bg-indigo-500/20" : "bg-white/[0.04]"}`}>
+                    <st.icon className={`w-4 h-4 ${selectedScan === st.id ? "text-indigo-400" : st.color}`} />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-[13px] font-medium ${selectedScan === st.id ? "text-indigo-400" : "text-[#e4e4e7]"}`}>{st.label}</p>
+                    <p className="text-[11px] text-[#71717a]">{st.desc}</p>
+                  </div>
+                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${selectedScan === st.id ? "border-indigo-400" : "border-white/20"}`}>
+                    {selectedScan === st.id && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-white/[0.06]">
+          <button onClick={onClose} className="px-3.5 py-2 rounded-md text-[13px] font-medium text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all">
+            Cancel
+          </button>
+          <button
+            onClick={() => selectedTarget && onStart(selectedTarget, selectedScan)}
+            disabled={!selectedTarget}
+            className="flex items-center gap-2 px-4 py-2 rounded-md text-[13px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-500/20"
+          >
+            <Play className="w-3.5 h-3.5" />
+            Start Pentest
           </button>
         </div>
       </div>
