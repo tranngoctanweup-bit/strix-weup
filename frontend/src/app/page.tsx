@@ -443,6 +443,7 @@ export default function Dashboard() {
     ...(canChat ? [{ id: "chat", icon: MessageCircle, label: "Chat" }] : []),
     { id: "_separator", icon: null as any, label: "" },
     { id: "repositories", icon: FolderGit, label: "Repositories" },
+    { id: "source-code", icon: FileText, label: "Source Code" },
     { id: "domains", icon: Globe, label: "Domains" },
     { id: "networks", icon: Network, label: "Networks" },
     { id: "integrations", icon: Puzzle, label: "Integrations" },
@@ -461,6 +462,7 @@ export default function Dashboard() {
     tools: "Tools",
     settings: "Settings",
     repositories: "Repositories",
+    "source-code": "Source Code Scanning",
     domains: "Domains",
     networks: "Networks",
     integrations: "Integrations",
@@ -1173,6 +1175,11 @@ export default function Dashboard() {
             {/* ─── Repositories Tab ────────────────────────────────── */}
             {activeTab === "repositories" && (
               <RepositoriesTab addToast={addToast} authFetch={authFetch} canEdit={canEdit} canScan={canScan} />
+            )}
+
+            {/* ─── Source Code Tab ──────────────────────────────────── */}
+            {activeTab === "source-code" && (
+              <SourceCodeTab addToast={addToast} authFetch={authFetch} canEdit={canEdit} canScan={canScan} />
             )}
 
             {/* ─── Domains Tab ─────────────────────────────────────── */}
@@ -2248,6 +2255,214 @@ function ToolsList() {
         {tools.length === 0 && (
           <div className="col-span-full">
             <EmptyStateLarge icon={Zap} title="No tools found" message="Security tools will appear here once configured" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Source Code Scanning Tab ────────────────────────────────────────────────
+
+function SourceCodeTab({ addToast, authFetch, canEdit, canScan }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; canEdit: boolean; canScan: boolean }) {
+  const [scans, setScans] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [form, setForm] = useState({ tool: "trivy", target: ".", project_key: "", server_url: "http://localhost:9000", language: "javascript" });
+  const [scanning, setScanning] = useState(false);
+
+  const fetchScans = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/source-scans`);
+      if (res.ok) setScans(await res.json());
+    } catch { } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchScans(); }, []);
+
+  const handleScan = async () => {
+    if (!form.target) { addToast("Target path required", "error"); return; }
+    setScanning(true);
+    try {
+      const body: any = { tool: form.tool, target: form.target };
+      if (form.tool === "sonar-scanner") {
+        body.project_key = form.project_key || `strix-${Date.now()}`;
+        body.server_url = form.server_url;
+      }
+      if (form.tool === "codeql") {
+        body.language = form.language;
+      }
+      const res = await authFetch(`${API_URL}/api/source-scans`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (res.ok) {
+        addToast(`Source scan started with ${form.tool}`, "success");
+        setShowScanModal(false);
+        fetchScans();
+      } else { addToast("Failed to start scan", "error"); }
+    } catch { addToast("Failed to start scan", "error"); }
+    finally { setScanning(false); }
+  };
+
+  const handleDelete = async (scanId: number) => {
+    try {
+      const res = await authFetch(`${API_URL}/api/source-scans/${scanId}`, { method: "DELETE" });
+      if (res.ok) { addToast("Scan deleted", "success"); fetchScans(); }
+    } catch { addToast("Failed to delete", "error"); }
+  };
+
+  const toolInfo: Record<string, { icon: string; color: string; desc: string }> = {
+    trivy: { icon: "🛡️", color: "text-blue-400", desc: "Filesystem vulnerability scanner — CVEs, secrets, misconfigs" },
+    "sonar-scanner": { icon: "📊", color: "text-purple-400", desc: "SonarQube static analysis — bugs, code smells, security hotspots" },
+    codeql: { icon: "🔬", color: "text-green-400", desc: "GitHub CodeQL semantic analysis — deep vulnerability detection" },
+  };
+
+  if (loading) return <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-40 rounded-lg" />)}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#e4e4e7]">Source Code Scanning</h3>
+          <p className="text-[12px] text-[#71717a] mt-0.5">SAST analysis with Trivy, SonarQube & CodeQL</p>
+        </div>
+        {canScan && (
+          <button onClick={() => setShowScanModal(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20">
+            <ScanLine className="w-3.5 h-3.5" /> New Source Scan
+          </button>
+        )}
+      </div>
+
+      {/* Tool Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {Object.entries(toolInfo).map(([key, val]) => (
+          <div key={key} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <span className="text-xl">{val.icon}</span>
+              <div>
+                <h4 className="text-[13px] font-semibold text-[#e4e4e7]">{key}</h4>
+                <p className="text-[11px] text-[#71717a]">{val.desc}</p>
+              </div>
+            </div>
+            <button onClick={() => { setForm({ ...form, tool: key }); setShowScanModal(true); }}
+              className="w-full mt-2 px-3 py-1.5 text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-md transition-all">
+              Scan with {key}
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Scan Modal */}
+      {showScanModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowScanModal(false)}>
+          <div className="bg-[#12121a] rounded-xl border border-white/[0.08] w-full max-w-lg p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[15px] font-semibold text-[#e4e4e7] mb-4">New Source Code Scan</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] text-[#71717a] mb-1 block">Scanner Tool</label>
+                <select value={form.tool} onChange={e => setForm({ ...form, tool: e.target.value })} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] focus:outline-none focus:border-indigo-500/50">
+                  <option value="trivy">🛡️ Trivy — Vulnerability, Secret & Misconfig Scanner</option>
+                  <option value="sonar-scanner">📊 SonarQube — Static Code Analysis</option>
+                  <option value="codeql">🔬 CodeQL — Semantic Code Analysis (GitHub)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[11px] text-[#71717a] mb-1 block">Target Path</label>
+                <input value={form.target} onChange={e => setForm({ ...form, target: e.target.value })} placeholder="/path/to/source or ." className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50" />
+              </div>
+              {form.tool === "sonar-scanner" && (
+                <>
+                  <div>
+                    <label className="text-[11px] text-[#71717a] mb-1 block">SonarQube Project Key</label>
+                    <input value={form.project_key} onChange={e => setForm({ ...form, project_key: e.target.value })} placeholder="my-project" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50" />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-[#71717a] mb-1 block">SonarQube Server URL</label>
+                    <input value={form.server_url} onChange={e => setForm({ ...form, server_url: e.target.value })} placeholder="http://localhost:9000" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50" />
+                  </div>
+                </>
+              )}
+              {form.tool === "codeql" && (
+                <div>
+                  <label className="text-[11px] text-[#71717a] mb-1 block">Language</label>
+                  <select value={form.language} onChange={e => setForm({ ...form, language: e.target.value })} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] focus:outline-none focus:border-indigo-500/50">
+                    <option value="javascript">JavaScript / TypeScript</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                    <option value="go">Go</option>
+                    <option value="csharp">C#</option>
+                    <option value="cpp">C / C++</option>
+                    <option value="ruby">Ruby</option>
+                    <option value="swift">Swift</option>
+                  </select>
+                </div>
+              )}
+              <div className="bg-white/[0.02] rounded-lg p-3 border border-white/[0.04]">
+                <p className="text-[11px] text-[#71717a]">{toolInfo[form.tool]?.desc}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowScanModal(false)} className="px-4 py-2 text-[13px] text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors">Cancel</button>
+              <button onClick={handleScan} disabled={scanning} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all disabled:opacity-50">
+                {scanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Scanning...</> : <><ScanLine className="w-3.5 h-3.5" /> Start Scan</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan History */}
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/[0.06]">
+          <h4 className="text-[13px] font-semibold text-[#e4e4e7]">Scan History</h4>
+        </div>
+        {scans.length > 0 ? (
+          <table className="w-full">
+            <thead>
+              <tr className="text-[11px] text-[#71717a] uppercase tracking-wider">
+                <th className="text-left px-4 py-2.5 font-medium">Tool</th>
+                <th className="text-left px-4 py-2.5 font-medium">Target</th>
+                <th className="text-left px-4 py-2.5 font-medium">Status</th>
+                <th className="text-center px-4 py-2.5 font-medium">Critical</th>
+                <th className="text-center px-4 py-2.5 font-medium">High</th>
+                <th className="text-center px-4 py-2.5 font-medium">Medium</th>
+                <th className="text-center px-4 py-2.5 font-medium">Low</th>
+                <th className="text-left px-4 py-2.5 font-medium">Date</th>
+                <th className="px-4 py-2.5"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {scans.map((scan) => {
+                const t = toolInfo[scan.tool] || { icon: "🔍", color: "text-gray-400" };
+                return (
+                  <tr key={scan.id} className="text-[12px] border-t border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span>{t.icon}</span>
+                        <span className="text-[#e4e4e7] font-medium">{scan.tool}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-[#71717a] font-mono truncate max-w-[200px]">{scan.target}</td>
+                    <td className="px-4 py-3"><StatusBadge status={scan.status} /></td>
+                    <td className="px-4 py-3 text-center"><span className={`font-medium ${scan.critical_count > 0 ? 'text-red-400' : 'text-[#71717a]'}`}>{scan.critical_count}</span></td>
+                    <td className="px-4 py-3 text-center"><span className={`font-medium ${scan.high_count > 0 ? 'text-orange-400' : 'text-[#71717a]'}`}>{scan.high_count}</span></td>
+                    <td className="px-4 py-3 text-center"><span className={`font-medium ${scan.medium_count > 0 ? 'text-yellow-400' : 'text-[#71717a]'}`}>{scan.medium_count}</span></td>
+                    <td className="px-4 py-3 text-center"><span className={`font-medium ${scan.low_count > 0 ? 'text-blue-400' : 'text-[#71717a]'}`}>{scan.low_count}</span></td>
+                    <td className="px-4 py-3 text-[#71717a]">{new Date(scan.created_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-3">
+                      {canEdit && (
+                        <button onClick={() => handleDelete(scan.id)} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Delete">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4"><ScanLine className="w-6 h-6 text-[#71717a]" /></div>
+            <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No source scans yet</p>
+            <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Run SAST analysis on your source code with Trivy, SonarQube, or CodeQL</p>
           </div>
         )}
       </div>

@@ -18,6 +18,7 @@ class ToolCategory(Enum):
     SYSTEM = "system"
     RECON = "recon"
     EXPLOIT = "exploit"
+    SAST = "sast"  # Static Application Security Testing
 
 @dataclass
 class ToolResult:
@@ -179,6 +180,32 @@ class ToolEngine:
                 "command": "sqlmap",
                 "args_template": "-u {url} --batch",
                 "dangerous": True
+            },
+            
+            # SAST / Source Code Scanning Tools
+            "trivy": {
+                "name": "trivy",
+                "description": "Comprehensive vulnerability scanner for containers, filesystems, and git repos",
+                "category": ToolCategory.SAST,
+                "command": "trivy",
+                "args_template": "fs --scanners vuln,secret,misconfig --format json {target}",
+                "dangerous": False
+            },
+            "sonar-scanner": {
+                "name": "sonar-scanner",
+                "description": "SonarQube/SonarCloud static code analysis scanner",
+                "category": ToolCategory.SAST,
+                "command": "sonar-scanner",
+                "args_template": "-Dsonar.projectKey={project_key} -Dsonar.sources={target} -Dsonar.host.url={server_url}",
+                "dangerous": False
+            },
+            "codeql": {
+                "name": "codeql",
+                "description": "GitHub CodeQL semantic code analysis engine",
+                "category": ToolCategory.SAST,
+                "command": "codeql",
+                "args_template": "database analyze {database} {query_suite} --format=sarif-latest --output={output}",
+                "dangerous": False
             }
         }
     
@@ -317,6 +344,31 @@ class ToolEngine:
                     "url": {"type": "string", "description": "Target URL with parameters"}
                 },
                 "required": ["url"]
+            },
+            "trivy": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Target directory or repo URL to scan"}
+                },
+                "required": ["target"]
+            },
+            "sonar-scanner": {
+                "type": "object",
+                "properties": {
+                    "project_key": {"type": "string", "description": "SonarQube project key"},
+                    "target": {"type": "string", "description": "Source directory to scan", "default": "."},
+                    "server_url": {"type": "string", "description": "SonarQube server URL", "default": "http://localhost:9000"}
+                },
+                "required": ["project_key"]
+            },
+            "codeql": {
+                "type": "object",
+                "properties": {
+                    "database": {"type": "string", "description": "CodeQL database path"},
+                    "query_suite": {"type": "string", "description": "Query suite (e.g., javascript-security-extended)", "default": "javascript-security-extended"},
+                    "output": {"type": "string", "description": "Output file path", "default": "results.sarif"}
+                },
+                "required": ["database"]
             }
         }
         

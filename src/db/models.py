@@ -303,3 +303,23 @@ class Integration(Base):
     status = Column(String(20), default="active")
     last_triggered_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SourceCodeScan(Base):
+    """Source code security scan (SAST)"""
+    __tablename__ = "source_code_scans"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tool = Column(String(50), nullable=False)  # trivy, sonar-scanner, codeql
+    target = Column(String(500), nullable=False)  # directory path or repo URL
+    repository_id = Column(Integer, ForeignKey("repositories.id"), nullable=True)
+    status = Column(String(20), default="pending")
+    findings_count = Column(Integer, default=0)
+    critical_count = Column(Integer, default=0)
+    high_count = Column(Integer, default=0)
+    medium_count = Column(Integer, default=0)
+    low_count = Column(Integer, default=0)
+    error = Column(Text)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -26,7 +26,7 @@ from src.core.tool_engine import ToolEngine
 from src.db.models import (
     init_db, get_db, Target, Scan, Vulnerability, ScanSchedule,
     ChatHistory, Report, User, ScanStatus, SeverityLevel,
-    Repository, NetworkRange, Integration,
+    Repository, NetworkRange, Integration, SourceCodeScan,
     create_target, create_scan, update_scan_status, create_vulnerability
 )
 
@@ -1244,6 +1244,137 @@ async def test_integration(
     integration.last_triggered_at = datetime.utcnow().isoformat()
     db.commit()
     return {"message": "Test notification sent", "status": "ok"}
+
+# ─── Source Code Scanning API ──────────────────────────────────────────────
+class SourceCodeScanRequest(BaseModel):
+    tool: str  # trivy, sonar-scanner, codeql
+    target: str  # directory path or repo URL
+    project_key: Optional[str] = None  # for sonarqube
+    server_url: Optional[str] = None  # for sonarqube
+    language: Optional[str] = None  # for codeql
+    repository_id: Optional[int] = None  # link to repository
+
+class SourceCodeScanResponse(BaseModel):
+    id: int
+    tool: str
+    target: str
+    status: str
+    findings_count: int = 0
+    critical_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    created_at: str
+    class Config:
+        from_attributes = True
+
+@app.post("/api/source-scans", response_model=SourceCodeScanResponse)
+async def create_source_scan(
+    request: SourceCodeScanRequest,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Start a source code scan"""
+    # Create scan record
+    scan = SourceCodeScan(
+        tool=request.tool,
+        target=request.target,
+        status="running",
+        findings_count=0,
+        critical_count=0,
+        high_count=0,
+        medium_count=0,
+        low_count=0,
+        repository_id=request.repository_id,
+        started_at=datetime.utcnow(),
+    )
+    db.add(scan)
+    db.commit()
+    db.refresh(scan)
+    
+    # Build tool args
+    args = {"target": request.target}
+    if request.tool == "sonar-scanner":
+        args["project_key"] = request.project_key or f"strix-{int(datetime.utcnow().timestamp())}"
+        args["server_url"] = request.server_url or "http://localhost:9000"
+    elif request.tool == "codeql":
+        lang = request.language or "javascript"
+        args["database"] = f"/tmp/codeql-db-{scan.id}"
+        args["query_suite"] = f"{lang}-security-extended"
+        args["output"] = f"/tmp/codeql-results-{scan.id}.sarif"
+    
+    async def run_source_scan():
+        try:
+            result = tool_engine.execute(request.tool, args)
+            scan.status = "completed" if result.success else "failed"
+            scan.completed_at = datetime.utcnow()
+            
+            # Parse findings from output
+            output = result.output
+            if request.tool == "trivy" and result.success:
+                try:
+                    trivy_json = json.loads(output)
+                    findings = []
+                    for result_item in trivy_json.get("Results", []):
+                        for vuln in result_item.get("Vulnerabilities", []):
+                            findings.append(vuln)
+                    scan.findings_count = len(findings)
+                    for f in findings:
+                        sev = f.get("Severity", "").lower()
+                        if sev == "critical": scan.critical_count += 1
+                        elif sev == "high": scan.high_count += 1
+                        elif sev == "medium": scan.medium_count += 1
+                        elif sev == "low": scan.low_count += 1
+                except json.JSONDecodeError:
+                    pass
+            
+            if not result.success:
+                scan.error = result.error
+            db.commit()
+        except Exception as e:
+            scan.status = "failed"
+            scan.error = str(e)
+            scan.completed_at = datetime.utcnow()
+            db.commit()
+    
+    background_tasks.add_task(lambda: asyncio.run(run_source_scan()))
+    return scan
+
+@app.get("/api/source-scans", response_model=List[SourceCodeScanResponse])
+async def list_source_scans(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all source code scans"""
+    return db.query(SourceCodeScan).order_by(SourceCodeScan.created_at.desc()).all()
+
+@app.get("/api/source-scans/{scan_id}")
+async def get_source_scan(
+    scan_id: int,
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get source code scan details"""
+    scan = db.query(SourceCodeScan).filter(SourceCodeScan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Source scan not found")
+    return scan
+
+@app.delete("/api/source-scans/{scan_id}")
+async def delete_source_scan(
+    scan_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Delete a source code scan"""
+    scan = db.query(SourceCodeScan).filter(SourceCodeScan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Source scan not found")
+    db.delete(scan)
+    db.commit()
+    return {"message": "Source scan deleted"}
 
 # Health check
 @app.get("/health")
