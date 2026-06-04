@@ -366,6 +366,7 @@ async def execute_scan(scan_id: int, target_id: int, target: str, scan_type: str
             
             combined_output = "\n\n".join(all_outputs)
             # Parse findings from output
+            combined_output = strip_ansi(combined_output)
             parse_scan_findings(db, scan_id, target_id, combined_output, target)
             ai_summary = await get_ai_summary(combined_output, "full_scan", target)
             update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=combined_output, ai_summary=ai_summary)
@@ -410,9 +411,10 @@ async def execute_scan(scan_id: int, target_id: int, target: str, scan_type: str
             
             if result.success:
                 # Parse findings from output
-                parse_scan_findings(db, scan_id, target_id, result.output or "", target)
-                ai_summary = await get_ai_summary(result.output, scan_type, target)
-                update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=result.output, ai_summary=ai_summary)
+                clean_output = strip_ansi(result.output or "")
+                parse_scan_findings(db, scan_id, target_id, clean_output, target)
+                ai_summary = await get_ai_summary(clean_output, scan_type, target)
+                update_scan_status(db, scan_id, ScanStatus.COMPLETED.value, output=clean_output, ai_summary=ai_summary)
                 await broadcast({
                     "type": "scan_complete",
                     "scan_id": scan_id,
@@ -429,12 +431,20 @@ async def execute_scan(scan_id: int, target_id: int, target: str, scan_type: str
     finally:
         db.close()
 
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes (color codes) from text"""
+    import re
+    return re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+
 def parse_scan_findings(db, scan_id: int, target_id: int, output: str, target: str):
     """Parse scan output and create Vulnerability records for findings"""
     import re
     
     if not output:
         return
+    
+    # Strip ANSI color codes from output
+    output = strip_ansi(output)
     
     findings = []
     
@@ -558,7 +568,7 @@ Format as markdown with clear headings. Be specific with fixes - include actual 
             ),
             AIMessage(
                 role="user",
-                content=f"Analyze this {scan_type} scan result for target {target}:\n\n{output[:4000]}"
+                content=f"Analyze this {scan_type} scan result for target {target}:\n\n{strip_ansi(output[:4000])}"
             )
         ]
         
@@ -651,6 +661,22 @@ async def vulnerability_stats(
         "fixed": fixed,
         "unfixed": unfixed
     }
+
+@app.post("/api/vulnerabilities/cleanup-ansi")
+async def cleanup_ansi_codes(user: User = Depends(require_admin), db=Depends(get_db)):
+    """Clean up ANSI escape codes from vulnerability titles and descriptions"""
+    vulns = db.query(Vulnerability).all()
+    cleaned = 0
+    for vuln in vulns:
+        original_title = vuln.title
+        original_desc = vuln.description
+        vuln.title = strip_ansi(vuln.title)
+        if vuln.description:
+            vuln.description = strip_ansi(vuln.description)
+        if vuln.title != original_title or vuln.description != original_desc:
+            cleaned += 1
+    db.commit()
+    return {"cleaned": cleaned}
 
 @app.patch("/api/vulnerabilities/{vuln_id}/confirm")
 async def confirm_vulnerability(
@@ -2014,10 +2040,11 @@ async def extract_issues_from_scan(scan_id: int, user: User = Depends(require_an
     # 3. If still no issues, parse raw output for basic findings
     if not issues_created and scan.output:
         import re
+        raw_output = strip_ansi(scan.output)
         # Subdomains
         subdomains = []
         in_sub = False
-        for line in scan.output.split('\n'):
+        for line in raw_output.split('\n'):
             if 'SUBFINDER' in line or 'SUBDOMAIN' in line:
                 in_sub = True
                 continue
@@ -2038,7 +2065,7 @@ async def extract_issues_from_scan(scan_id: int, user: User = Depends(require_an
             issues_created.append(issue)
         
         # Open ports from nmap
-        for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)\s*(.*)', scan.output):
+        for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)\s*(.*)', raw_output):
             port, service, version = match.groups()
             issue = Issue(
                 scan_id=scan_id,
@@ -2052,7 +2079,7 @@ async def extract_issues_from_scan(scan_id: int, user: User = Depends(require_an
             issues_created.append(issue)
         
         # Nuclei findings
-        for match in re.finditer(r'\[(\w+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]*)\]', scan.output):
+        for match in re.finditer(r'\[(\w+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]*)\]', raw_output):
             sev_raw, tpl, proto, name, url = match.groups()
             sev_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
             issue = Issue(
