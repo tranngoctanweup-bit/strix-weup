@@ -1172,9 +1172,7 @@ export default function Dashboard() {
 
             {/* ─── Repositories Tab ────────────────────────────────── */}
             {activeTab === "repositories" && (
-              <div className="space-y-4">
-                <EmptyStateLarge icon={FolderGit} title="Connect your repositories" message="Link your GitHub, GitLab, or Bitbucket repositories to enable automated security scanning and PR reviews" />
-              </div>
+              <RepositoriesTab addToast={addToast} authFetch={authFetch} canEdit={canEdit} canScan={canScan} />
             )}
 
             {/* ─── Domains Tab ─────────────────────────────────────── */}
@@ -1319,16 +1317,12 @@ export default function Dashboard() {
 
             {/* ─── Networks Tab ────────────────────────────────────── */}
             {activeTab === "networks" && (
-              <div className="space-y-4">
-                <EmptyStateLarge icon={Network} title="Network scanning coming soon" message="Define network ranges and subnets for automated discovery and continuous monitoring" />
-              </div>
+              <NetworksTab addToast={addToast} authFetch={authFetch} canEdit={canEdit} canScan={canScan} />
             )}
 
             {/* ─── Integrations Tab ────────────────────────────────── */}
             {activeTab === "integrations" && (
-              <div className="space-y-4">
-                <EmptyStateLarge icon={Puzzle} title="Connect third-party tools" message="Integrate with Slack, Jira, PagerDuty, SIEM platforms, and more to streamline your security workflow" />
-              </div>
+              <IntegrationsTab addToast={addToast} authFetch={authFetch} isAdmin={isAdmin} />
             )}
 
             {/* ─── AI Chat Tab ────────────────────────────────────── */}
@@ -2254,6 +2248,470 @@ function ToolsList() {
         {tools.length === 0 && (
           <div className="col-span-full">
             <EmptyStateLarge icon={Zap} title="No tools found" message="Security tools will appear here once configured" />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Repositories Tab ─────────────────────────────────────────────────────
+
+function RepositoriesTab({ addToast, authFetch, canEdit, canScan }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; canEdit: boolean; canScan: boolean }) {
+  const [repos, setRepos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", url: "", provider: "github", description: "" });
+  const [scanning, setScanning] = useState<Set<number>>(new Set());
+
+  const fetchRepos = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/repositories`);
+      if (res.ok) setRepos(await res.json());
+    } catch { } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchRepos(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.name || !form.url) { addToast("Name and URL required", "error"); return; }
+    try {
+      const res = await authFetch(`${API_URL}/api/repositories`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      if (res.ok) { addToast(`Repository "${form.name}" added`, "success"); setShowAdd(false); setForm({ name: "", url: "", provider: "github", description: "" }); fetchRepos(); }
+      else { addToast("Failed to add repository", "error"); }
+    } catch { addToast("Failed to add repository", "error"); }
+  };
+
+  const handleScan = async (repoId: number) => {
+    setScanning(prev => new Set(prev).add(repoId));
+    try {
+      const res = await authFetch(`${API_URL}/api/repositories/${repoId}/scan`, { method: "POST" });
+      if (res.ok) { addToast("Secret scan started", "success"); setTimeout(() => { fetchRepos(); setScanning(prev => { const s = new Set(prev); s.delete(repoId); return s; }); }, 3000); }
+      else { addToast("Scan failed", "error"); setScanning(prev => { const s = new Set(prev); s.delete(repoId); return s; }); }
+    } catch { addToast("Scan failed", "error"); setScanning(prev => { const s = new Set(prev); s.delete(repoId); return s; }); }
+  };
+
+  const handleDelete = async (repoId: number, name: string) => {
+    if (!confirm(`Delete repository "${name}"?`)) return;
+    try {
+      const res = await authFetch(`${API_URL}/api/repositories/${repoId}`, { method: "DELETE" });
+      if (res.ok) { addToast(`Repository "${name}" deleted`, "success"); fetchRepos(); }
+      else { addToast("Failed to delete", "error"); }
+    } catch { addToast("Failed to delete", "error"); }
+  };
+
+  if (loading) return <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-40 rounded-lg" />)}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#e4e4e7]">Repositories</h3>
+          <p className="text-[12px] text-[#71717a] mt-0.5">{repos.length} repositories connected</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20">
+            <Plus className="w-3.5 h-3.5" /> Add Repository
+          </button>
+        )}
+      </div>
+
+      {/* Add Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
+          <div className="bg-[#12121a] rounded-xl border border-white/[0.08] w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[15px] font-semibold text-[#e4e4e7] mb-4">Add Repository</h3>
+            <div className="space-y-3">
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Repository name" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50" />
+              <input value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} placeholder="https://github.com/org/repo" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50" />
+              <select value={form.provider} onChange={e => setForm({ ...form, provider: e.target.value })} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] focus:outline-none focus:border-indigo-500/50">
+                <option value="github">GitHub</option>
+                <option value="gitlab">GitLab</option>
+                <option value="bitbucket">Bitbucket</option>
+              </select>
+              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description (optional)" rows={2} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50 resize-none" />
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-[13px] text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors">Cancel</button>
+              <button onClick={handleAdd} className="px-4 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all">Add Repository</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Repo Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {repos.map((repo) => {
+          const providerIcons: Record<string, string> = { github: "🐙", gitlab: "🦊", bitbucket: "🪣" };
+          const isScanning = scanning.has(repo.id) || repo.status === "scanning";
+          return (
+            <div key={repo.id} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] transition-all duration-200">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-md bg-white/[0.04] text-lg">{providerIcons[repo.provider] || "📁"}</div>
+                  <div className="min-w-0">
+                    <h4 className="text-[13px] font-semibold text-[#e4e4e7] truncate">{repo.name}</h4>
+                    <p className="text-[11px] text-[#71717a] truncate font-mono">{repo.url}</p>
+                  </div>
+                </div>
+                <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">{repo.provider}</span>
+              </div>
+              <p className="text-[12px] text-[#71717a] mb-3 line-clamp-2">{repo.description || "No description"}</p>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-[11px] text-[#71717a]">Secrets: <span className={`font-medium ${repo.secrets_found > 0 ? 'text-red-400' : 'text-green-400'}`}>{repo.secrets_found}</span></span>
+                {repo.last_scanned_at && <span className="text-[11px] text-[#71717a]">Last scan: {new Date(repo.last_scanned_at).toLocaleDateString()}</span>}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#71717a]">Added {new Date(repo.created_at).toLocaleDateString()}</span>
+                <div className="flex items-center gap-2">
+                  {canScan && (
+                    isScanning ? (
+                      <button disabled className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 cursor-wait">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Scanning...
+                      </button>
+                    ) : (
+                      <button onClick={() => handleScan(repo.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all">
+                        <Search className="w-3 h-3" /> Scan Secrets
+                      </button>
+                    )
+                  )}
+                  {canEdit && (
+                    <button onClick={() => handleDelete(repo.id, repo.name)} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Delete">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {repos.length === 0 && (
+          <div className="col-span-full">
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4"><FolderGit className="w-6 h-6 text-[#71717a]" /></div>
+              <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No repositories connected</p>
+              <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Link your GitHub, GitLab, or Bitbucket repos for automated secret scanning</p>
+              {canEdit && (
+                <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
+                  <Plus className="w-3.5 h-3.5" /> Add Your First Repository
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Networks Tab ─────────────────────────────────────────────────────────
+
+function NetworksTab({ addToast, authFetch, canEdit, canScan }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; canEdit: boolean; canScan: boolean }) {
+  const [networks, setNetworks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", cidr: "", description: "" });
+  const [scanning, setScanning] = useState<Set<number>>(new Set());
+
+  const fetchNetworks = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/networks`);
+      if (res.ok) setNetworks(await res.json());
+    } catch { } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchNetworks(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.name || !form.cidr) { addToast("Name and CIDR required", "error"); return; }
+    try {
+      const res = await authFetch(`${API_URL}/api/networks`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      if (res.ok) { addToast(`Network "${form.name}" added`, "success"); setShowAdd(false); setForm({ name: "", cidr: "", description: "" }); fetchNetworks(); }
+      else { addToast("Failed to add network", "error"); }
+    } catch { addToast("Failed to add network", "error"); }
+  };
+
+  const handleDiscover = async (networkId: number) => {
+    setScanning(prev => new Set(prev).add(networkId));
+    try {
+      const res = await authFetch(`${API_URL}/api/networks/${networkId}/discover`, { method: "POST" });
+      if (res.ok) { addToast("Host discovery started", "success"); setTimeout(() => { fetchNetworks(); setScanning(prev => { const s = new Set(prev); s.delete(networkId); return s; }); }, 5000); }
+      else { addToast("Discovery failed", "error"); setScanning(prev => { const s = new Set(prev); s.delete(networkId); return s; }); }
+    } catch { addToast("Discovery failed", "error"); setScanning(prev => { const s = new Set(prev); s.delete(networkId); return s; }); }
+  };
+
+  const handleDelete = async (networkId: number, name: string) => {
+    if (!confirm(`Delete network "${name}"?`)) return;
+    try {
+      const res = await authFetch(`${API_URL}/api/networks/${networkId}`, { method: "DELETE" });
+      if (res.ok) { addToast(`Network "${name}" deleted`, "success"); fetchNetworks(); }
+      else { addToast("Failed to delete", "error"); }
+    } catch { addToast("Failed to delete", "error"); }
+  };
+
+  if (loading) return <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-40 rounded-lg" />)}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#e4e4e7]">Networks</h3>
+          <p className="text-[12px] text-[#71717a] mt-0.5">{networks.length} network ranges configured</p>
+        </div>
+        {canEdit && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20">
+            <Plus className="w-3.5 h-3.5" /> Add Network
+          </button>
+        )}
+      </div>
+
+      {/* Add Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
+          <div className="bg-[#12121a] rounded-xl border border-white/[0.08] w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[15px] font-semibold text-[#e4e4e7] mb-4">Add Network Range</h3>
+            <div className="space-y-3">
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Network name (e.g., Office LAN)" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50" />
+              <input value={form.cidr} onChange={e => setForm({ ...form, cidr: e.target.value })} placeholder="CIDR (e.g., 192.168.1.0/24)" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50" />
+              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description (optional)" rows={2} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50 resize-none" />
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-[13px] text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors">Cancel</button>
+              <button onClick={handleAdd} className="px-4 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all">Add Network</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Network Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {networks.map((net) => {
+          const isScanning = scanning.has(net.id) || net.status === "scanning";
+          return (
+            <div key={net.id} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] transition-all duration-200">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-md bg-white/[0.04]"><Network className="w-4 h-4 text-green-400" /></div>
+                  <div className="min-w-0">
+                    <h4 className="text-[13px] font-semibold text-[#e4e4e7] truncate">{net.name}</h4>
+                    <p className="text-[11px] text-[#71717a] truncate font-mono">{net.cidr}</p>
+                  </div>
+                </div>
+                {isScanning && <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />}
+              </div>
+              <p className="text-[12px] text-[#71717a] mb-3 line-clamp-2">{net.description || "No description"}</p>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-[11px] text-[#71717a]">Hosts: <span className="font-medium text-green-400">{net.hosts_discovered}</span></span>
+                {net.last_scanned_at && <span className="text-[11px] text-[#71717a]">Last scan: {new Date(net.last_scanned_at).toLocaleDateString()}</span>}
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#71717a]">Added {new Date(net.created_at).toLocaleDateString()}</span>
+                <div className="flex items-center gap-2">
+                  {canScan && (
+                    isScanning ? (
+                      <button disabled className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 cursor-wait">
+                        <Loader2 className="w-3 h-3 animate-spin" /> Discovering...
+                      </button>
+                    ) : (
+                      <button onClick={() => handleDiscover(net.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-green-400 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 transition-all">
+                        <Radar className="w-3 h-3" /> Discover Hosts
+                      </button>
+                    )
+                  )}
+                  {canEdit && (
+                    <button onClick={() => handleDelete(net.id, net.name)} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Delete">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {networks.length === 0 && (
+          <div className="col-span-full">
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4"><Network className="w-6 h-6 text-[#71717a]" /></div>
+              <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No networks configured</p>
+              <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Add network ranges for automated host discovery and monitoring</p>
+              {canEdit && (
+                <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
+                  <Plus className="w-3.5 h-3.5" /> Add Your First Network
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Integrations Tab ─────────────────────────────────────────────────────
+
+function IntegrationsTab({ addToast, authFetch, isAdmin }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; isAdmin: boolean }) {
+  const [integrations, setIntegrations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ name: "", type: "slack", config: "{}" });
+
+  const fetchIntegrations = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/integrations`);
+      if (res.ok) setIntegrations(await res.json());
+    } catch { } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchIntegrations(); }, []);
+
+  const handleAdd = async () => {
+    if (!form.name) { addToast("Name required", "error"); return; }
+    let config = {};
+    try { config = JSON.parse(form.config); } catch { addToast("Invalid JSON config", "error"); return; }
+    try {
+      const res = await authFetch(`${API_URL}/api/integrations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...form, config }) });
+      if (res.ok) { addToast(`Integration "${form.name}" added`, "success"); setShowAdd(false); setForm({ name: "", type: "slack", config: "{}" }); fetchIntegrations(); }
+      else { addToast("Failed to add integration", "error"); }
+    } catch { addToast("Failed to add integration", "error"); }
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm(`Delete integration "${name}"?`)) return;
+    try {
+      const res = await authFetch(`${API_URL}/api/integrations/${id}`, { method: "DELETE" });
+      if (res.ok) { addToast(`Integration "${name}" deleted`, "success"); fetchIntegrations(); }
+      else { addToast("Failed to delete", "error"); }
+    } catch { addToast("Failed to delete", "error"); }
+  };
+
+  const handleTest = async (id: number) => {
+    try {
+      const res = await authFetch(`${API_URL}/api/integrations/${id}/test`, { method: "POST" });
+      if (res.ok) { addToast("Test notification sent!", "success"); fetchIntegrations(); }
+      else { addToast("Test failed", "error"); }
+    } catch { addToast("Test failed", "error"); }
+  };
+
+  const integrationTypes: Record<string, { icon: string; color: string; desc: string }> = {
+    slack: { icon: "💬", color: "text-purple-400", desc: "Send alerts to Slack channels" },
+    jira: { icon: "📋", color: "text-blue-400", desc: "Create Jira tickets for vulnerabilities" },
+    webhook: { icon: "🔗", color: "text-green-400", desc: "Send HTTP webhooks on events" },
+    pagerduty: { icon: "📟", color: "text-yellow-400", desc: "Trigger PagerDuty incidents" },
+    email: { icon: "📧", color: "text-red-400", desc: "Send email notifications" },
+  };
+
+  if (loading) return <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-40 rounded-lg" />)}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-[#e4e4e7]">Integrations</h3>
+          <p className="text-[12px] text-[#71717a] mt-0.5">{integrations.length} integrations connected</p>
+        </div>
+        {isAdmin && (
+          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20">
+            <Plus className="w-3.5 h-3.5" /> Add Integration
+          </button>
+        )}
+      </div>
+
+      {/* Available Integrations */}
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+        <h4 className="text-[13px] font-semibold text-[#e4e4e7] mb-3">Available Integrations</h4>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {Object.entries(integrationTypes).map(([key, val]) => (
+            <button key={key} onClick={() => { setForm({ name: `${key.charAt(0).toUpperCase() + key.slice(1)} Integration`, type: key, config: "{}" }); setShowAdd(true); }}
+              className="flex flex-col items-center gap-2 p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] hover:border-indigo-500/30 hover:bg-indigo-500/5 transition-all group">
+              <span className="text-xl">{val.icon}</span>
+              <span className="text-[12px] font-medium text-[#a1a1aa] group-hover:text-indigo-400 capitalize">{key}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Add Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50" onClick={() => setShowAdd(false)}>
+          <div className="bg-[#12121a] rounded-xl border border-white/[0.08] w-full max-w-md p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h3 className="text-[15px] font-semibold text-[#e4e4e7] mb-4">Add Integration</h3>
+            <div className="space-y-3">
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Integration name" className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none focus:border-indigo-500/50" />
+              <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] focus:outline-none focus:border-indigo-500/50">
+                {Object.entries(integrationTypes).map(([key, val]) => (
+                  <option key={key} value={key}>{val.icon} {key.charAt(0).toUpperCase() + key.slice(1)} — {val.desc}</option>
+                ))}
+              </select>
+              <div>
+                <label className="text-[11px] text-[#71717a] mb-1 block">Configuration (JSON)</label>
+                <textarea value={form.config} onChange={e => setForm({ ...form, config: e.target.value })} rows={4} className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] font-mono focus:outline-none focus:border-indigo-500/50 resize-none" />
+                <p className="text-[10px] text-[#71717a] mt-1">
+                  {form.type === "slack" && '{"webhook_url": "https://hooks.slack.com/services/..."}'}
+                  {form.type === "jira" && '{"url": "https://your-domain.atlassian.net", "project_key": "SEC", "email": "...", "api_token": "..."}'}
+                  {form.type === "webhook" && '{"url": "https://your-server.com/webhook", "method": "POST"}'}
+                  {form.type === "pagerduty" && '{"routing_key": "...", "severity": "critical"}'}
+                  {form.type === "email" && '{"smtp_host": "smtp.gmail.com", "smtp_port": 587, "to": "security@company.com"}'}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-[13px] text-[#a1a1aa] hover:text-[#e4e4e7] transition-colors">Cancel</button>
+              <button onClick={handleAdd} className="px-4 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all">Add Integration</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Integration Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {integrations.map((integ) => {
+          const t = integrationTypes[integ.type] || { icon: "🔌", color: "text-gray-400", desc: "Custom integration" };
+          return (
+            <div key={integ.id} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] transition-all duration-200">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-md bg-white/[0.04] text-lg">{t.icon}</div>
+                  <div className="min-w-0">
+                    <h4 className="text-[13px] font-semibold text-[#e4e4e7] truncate">{integ.name}</h4>
+                    <p className="text-[11px] text-[#71717a] capitalize">{integ.type}</p>
+                  </div>
+                </div>
+                <span className={`flex items-center gap-1.5 text-[10px] ${integ.enabled ? 'text-green-400' : 'text-[#71717a]'}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${integ.enabled ? 'bg-green-500' : 'bg-[#71717a]'}`} />
+                  {integ.enabled ? "Active" : "Disabled"}
+                </span>
+              </div>
+              <p className="text-[12px] text-[#71717a] mb-3">{t.desc}</p>
+              {integ.last_triggered_at && (
+                <p className="text-[11px] text-[#71717a] mb-3">Last triggered: {new Date(integ.last_triggered_at).toLocaleString()}</p>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#71717a]">Added {new Date(integ.created_at).toLocaleDateString()}</span>
+                <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <>
+                      <button onClick={() => handleTest(integ.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-green-400 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 transition-all">
+                        <Zap className="w-3 h-3" /> Test
+                      </button>
+                      <button onClick={() => handleDelete(integ.id, integ.name)} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Delete">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {integrations.length === 0 && (
+          <div className="col-span-full">
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] mb-4"><Puzzle className="w-6 h-6 text-[#71717a]" /></div>
+              <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">No integrations configured</p>
+              <p className="text-[12px] text-[#71717a] max-w-sm mb-4">Connect Slack, Jira, PagerDuty or webhooks to streamline your security workflow</p>
+              {isAdmin && (
+                <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
+                  <Plus className="w-3.5 h-3.5" /> Add Your First Integration
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

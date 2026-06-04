@@ -260,3 +260,46 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Repository(Base):
+    """Git repository for secret scanning"""
+    __tablename__ = "repositories"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    url = Column(String(500), nullable=False)
+    provider = Column(String(50), default="github")  # github, gitlab, bitbucket
+    description = Column(Text)
+    status = Column(String(20), default="active")
+    secrets_found = Column(Integer, default=0)
+    last_scanned_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class NetworkRange(Base):
+    """Network range for host discovery"""
+    __tablename__ = "network_ranges"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    cidr = Column(String(50), nullable=False)  # e.g., "192.168.1.0/24"
+    description = Column(Text)
+    status = Column(String(20), default="active")
+    hosts_discovered = Column(Integer, default=0)
+    last_scanned_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Integration(Base):
+    """Third-party integration"""
+    __tablename__ = "integrations"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(255), nullable=False)
+    type = Column(String(50), nullable=False)  # slack, jira, webhook, pagerduty, email
+    config = Column(JSON, default=dict)
+    enabled = Column(Boolean, default=True)
+    status = Column(String(20), default="active")
+    last_triggered_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)

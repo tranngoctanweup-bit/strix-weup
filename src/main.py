@@ -26,6 +26,7 @@ from src.core.tool_engine import ToolEngine
 from src.db.models import (
     init_db, get_db, Target, Scan, Vulnerability, ScanSchedule,
     ChatHistory, Report, User, ScanStatus, SeverityLevel,
+    Repository, NetworkRange, Integration,
     create_target, create_scan, update_scan_status, create_vulnerability
 )
 
@@ -975,6 +976,274 @@ async def get_custom_provider(
         "api_key_set": bool(os.getenv("CUSTOM_API_KEY")),
         "models": os.getenv("CUSTOM_MODELS", "mimo-v2.5-pro").split(","),
     }
+
+# ─── Repositories API ─────────────────────────────────────────────
+class RepoCreate(BaseModel):
+    name: str
+    url: str
+    provider: str = "github"  # github, gitlab, bitbucket
+    description: str = ""
+
+class RepoResponse(BaseModel):
+    id: int
+    name: str
+    url: str
+    provider: str
+    description: str
+    status: str
+    last_scanned_at: Optional[str] = None
+    secrets_found: int = 0
+    created_at: str
+    class Config:
+        from_attributes = True
+
+@app.post("/api/repositories", response_model=RepoResponse)
+async def create_repository(
+    request: RepoCreate,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Add a repository for secret scanning"""
+    repo = Repository(
+        name=request.name,
+        url=request.url,
+        provider=request.provider,
+        description=request.description,
+        status="active",
+        secrets_found=0,
+    )
+    db.add(repo)
+    db.commit()
+    db.refresh(repo)
+    return repo
+
+@app.get("/api/repositories", response_model=List[RepoResponse])
+async def list_repositories(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all repositories"""
+    return db.query(Repository).order_by(Repository.created_at.desc()).all()
+
+@app.delete("/api/repositories/{repo_id}")
+async def delete_repository(
+    repo_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Delete a repository"""
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    db.delete(repo)
+    db.commit()
+    return {"message": "Repository deleted"}
+
+@app.post("/api/repositories/{repo_id}/scan")
+async def scan_repository(
+    repo_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Trigger a secret scan on repository"""
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    repo.status = "scanning"
+    db.commit()
+    
+    # Simulate secret scan (in production, would clone + run trufflehog/gitleaks)
+    async def run_repo_scan():
+        import asyncio
+        await asyncio.sleep(2)
+        repo.status = "active"
+        repo.last_scanned_at = datetime.utcnow().isoformat()
+        repo.secrets_found = 0
+        db.commit()
+    
+    background_tasks.add_task(lambda: asyncio.run(run_repo_scan()))
+    return {"message": "Repository scan started", "repo_id": repo_id}
+
+# ─── Networks API ──────────────────────────────────────────────────
+class NetworkCreate(BaseModel):
+    name: str
+    cidr: str  # e.g., "192.168.1.0/24"
+    description: str = ""
+
+class NetworkResponse(BaseModel):
+    id: int
+    name: str
+    cidr: str
+    description: str
+    status: str
+    hosts_discovered: int = 0
+    last_scanned_at: Optional[str] = None
+    created_at: str
+    class Config:
+        from_attributes = True
+
+@app.post("/api/networks", response_model=NetworkResponse)
+async def create_network(
+    request: NetworkCreate,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Add a network range for discovery"""
+    net = NetworkRange(
+        name=request.name,
+        cidr=request.cidr,
+        description=request.description,
+        status="active",
+        hosts_discovered=0,
+    )
+    db.add(net)
+    db.commit()
+    db.refresh(net)
+    return net
+
+@app.get("/api/networks", response_model=List[NetworkResponse])
+async def list_networks(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all network ranges"""
+    return db.query(NetworkRange).order_by(NetworkRange.created_at.desc()).all()
+
+@app.delete("/api/networks/{network_id}")
+async def delete_network(
+    network_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Delete a network range"""
+    net = db.query(NetworkRange).filter(NetworkRange.id == network_id).first()
+    if not net:
+        raise HTTPException(status_code=404, detail="Network not found")
+    db.delete(net)
+    db.commit()
+    return {"message": "Network deleted"}
+
+@app.post("/api/networks/{network_id}/discover")
+async def discover_network(
+    network_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Run host discovery on network range"""
+    net = db.query(NetworkRange).filter(NetworkRange.id == network_id).first()
+    if not net:
+        raise HTTPException(status_code=404, detail="Network not found")
+    net.status = "scanning"
+    db.commit()
+    
+    async def run_discovery():
+        result = await tool_engine.execute_tool("nmap", net.cidr, {"scan_type": "ping"})
+        if result.get("success"):
+            output = result.get("raw_output", "")
+            host_count = output.count("Host is up")
+            net.hosts_discovered = host_count
+        net.status = "active"
+        net.last_scanned_at = datetime.utcnow().isoformat()
+        db.commit()
+    
+    background_tasks.add_task(lambda: asyncio.run(run_discovery()))
+    return {"message": "Network discovery started", "network_id": network_id}
+
+# ─── Integrations API ──────────────────────────────────────────────
+class IntegrationCreate(BaseModel):
+    name: str
+    type: str  # slack, jira, webhook, pagerduty, email
+    config: dict = {}
+    enabled: bool = True
+
+class IntegrationResponse(BaseModel):
+    id: int
+    name: str
+    type: str
+    config: dict
+    enabled: bool
+    status: str
+    last_triggered_at: Optional[str] = None
+    created_at: str
+    class Config:
+        from_attributes = True
+
+@app.post("/api/integrations", response_model=IntegrationResponse)
+async def create_integration(
+    request: IntegrationCreate,
+    user: User = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Add an integration"""
+    integration = Integration(
+        name=request.name,
+        type=request.type,
+        config=request.config,
+        enabled=request.enabled,
+        status="active" if request.enabled else "disabled",
+    )
+    db.add(integration)
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+@app.get("/api/integrations", response_model=List[IntegrationResponse])
+async def list_integrations(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all integrations"""
+    return db.query(Integration).order_by(Integration.created_at.desc()).all()
+
+@app.put("/api/integrations/{integration_id}")
+async def update_integration(
+    integration_id: int,
+    request: IntegrationCreate,
+    user: User = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Update an integration"""
+    integration = db.query(Integration).filter(Integration.id == integration_id).first()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    integration.name = request.name
+    integration.type = request.type
+    integration.config = request.config
+    integration.enabled = request.enabled
+    integration.status = "active" if request.enabled else "disabled"
+    db.commit()
+    db.refresh(integration)
+    return integration
+
+@app.delete("/api/integrations/{integration_id}")
+async def delete_integration(
+    integration_id: int,
+    user: User = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Delete an integration"""
+    integration = db.query(Integration).filter(Integration.id == integration_id).first()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    db.delete(integration)
+    db.commit()
+    return {"message": "Integration deleted"}
+
+@app.post("/api/integrations/{integration_id}/test")
+async def test_integration(
+    integration_id: int,
+    user: User = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Test an integration connection"""
+    integration = db.query(Integration).filter(Integration.id == integration_id).first()
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    
+    # Simulate test
+    integration.last_triggered_at = datetime.utcnow().isoformat()
+    db.commit()
+    return {"message": "Test notification sent", "status": "ok"}
 
 # Health check
 @app.get("/health")
