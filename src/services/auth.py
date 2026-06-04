@@ -1,6 +1,6 @@
 """
 Strix Pro - Authentication Service
-JWT-based auth with bcrypt password hashing
+JWT-based auth with bcrypt password hashing and RBAC
 """
 
 import os
@@ -9,7 +9,9 @@ from typing import Optional
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
-from src.db.models import User, SessionLocal
+from fastapi import HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from src.db.models import User, SessionLocal, get_db
 
 SECRET_KEY = os.environ.get('AUTH_SECRET_KEY', 'strix-pro-secret-change-in-production')
 ALGORITHM = "HS256"
@@ -17,6 +19,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer()
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -55,7 +58,7 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     return user
 
 
-def register_user(db: Session, name: str, email: str, password: str, role: str = "user") -> User:
+def register_user(db: Session, name: str, email: str, password: str, role: str = "viewer") -> User:
     if db.query(User).filter(User.email == email).first():
         raise ValueError("Email already registered")
     user = User(
@@ -79,3 +82,32 @@ def get_current_user(db: Session, token: str) -> Optional[User]:
     if not user_id:
         return None
     return db.query(User).filter(User.id == int(user_id)).first()
+
+
+# ─── FastAPI Dependencies for RBAC ───────────────────────────────────────────
+
+async def get_current_user_dep(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+    """FastAPI dependency to get current authenticated user from Bearer token"""
+    token = credentials.credentials
+    user = get_current_user(db, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def require_role(*roles):
+    """Dependency factory that requires the user to have one of the specified roles"""
+    async def role_checker(user: User = Depends(get_current_user_dep)) -> User:
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return role_checker
+
+
+# Convenience role dependencies
+require_admin = require_role("admin")
+require_developer_or_admin = require_role("admin", "developer")
+require_any_role = require_role("admin", "developer", "viewer")

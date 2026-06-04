@@ -154,6 +154,28 @@ class Report(Base):
 def init_db():
     """Initialize database"""
     Base.metadata.create_all(bind=engine)
+    seed_admin_user()
+
+
+def seed_admin_user():
+    """Create default admin user if no users exist"""
+    from passlib.context import CryptContext
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    db = SessionLocal()
+    try:
+        if db.query(User).count() == 0:
+            admin = User(
+                name="Admin",
+                email="admin@strix.pro",
+                hashed_password=pwd_ctx.hash("admin123"),
+                role="admin",
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+            print("✅ Default admin user created (admin@strix.pro / admin123)")
+    finally:
+        db.close()
 
 def get_db():
     """Get database session"""

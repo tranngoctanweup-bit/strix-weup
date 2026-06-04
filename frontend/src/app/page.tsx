@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "./auth-context";
 import {
   Shield,
   Target,
@@ -37,6 +39,9 @@ import {
   EyeOff,
   FileText,
   Layers,
+  LogOut,
+  Users,
+  Crown,
 } from "lucide-react";
 
 // API base URL
@@ -96,6 +101,8 @@ interface Toast {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
+  const { user, token, logout, isAuthenticated, canEdit, canScan, canChat, isAdmin, hasRole, authFetch } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [scans, setScans] = useState<Scan[]>([]);
@@ -117,26 +124,41 @@ export default function Dashboard() {
     }, 3000);
   };
 
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.push("/login");
+    }
+  }, [isAuthenticated, router]);
+
   // Fetch data
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [token]);
 
   const fetchData = async () => {
     try {
       const [statsRes, targetsRes, scansRes, vulnsRes] = await Promise.all([
-        fetch(`${API_URL}/api/dashboard/stats`),
-        fetch(`${API_URL}/api/targets`),
-        fetch(`${API_URL}/api/scans?limit=10`),
-        fetch(`${API_URL}/api/vulnerabilities?limit=10`),
+        authFetch(`${API_URL}/api/dashboard/stats`),
+        authFetch(`${API_URL}/api/targets`),
+        authFetch(`${API_URL}/api/scans?limit=10`),
+        authFetch(`${API_URL}/api/vulnerabilities?limit=10`),
       ]);
 
       if (statsRes.ok) setStats(await statsRes.json());
       if (targetsRes.ok) setTargets(await targetsRes.json());
       if (scansRes.ok) setScans(await scansRes.json());
       if (vulnsRes.ok) setVulns(await vulnsRes.json());
+
+      // Handle 403 responses
+      for (const res of [statsRes, targetsRes, scansRes, vulnsRes]) {
+        if (res.status === 403) {
+          addToast("Insufficient permissions", "error");
+          break;
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
@@ -146,12 +168,14 @@ export default function Dashboard() {
 
   const addTarget = async (data: { name: string; host: string; type: string; description: string }) => {
     try {
-      const res = await fetch(`${API_URL}/api/targets`, {
+      const res = await authFetch(`${API_URL}/api/targets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (res.ok) {
+      if (res.status === 403) {
+        addToast("Insufficient permissions", "error");
+      } else if (res.ok) {
         fetchData();
         setShowAddTarget(false);
         addToast(`Target "${data.name}" added successfully`, "success");
@@ -165,12 +189,14 @@ export default function Dashboard() {
 
   const startScan = async (targetId: number, scanType: string) => {
     try {
-      const res = await fetch(`${API_URL}/api/scans`, {
+      const res = await authFetch(`${API_URL}/api/scans`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_id: targetId, scan_type: scanType }),
       });
-      if (res.ok) {
+      if (res.status === 403) {
+        addToast("Insufficient permissions", "error");
+      } else if (res.ok) {
         fetchData();
         setShowScanModal(null);
         addToast(`${scanType} scan started`, "success");
@@ -238,15 +264,15 @@ export default function Dashboard() {
 
         {/* Navigation */}
         <nav className="flex-1 p-3 space-y-0.5">
-          {[
+          {([
             { id: "dashboard", icon: BarChart3, label: "Overview" },
             { id: "targets", icon: Target, label: "Targets" },
             { id: "scans", icon: Search, label: "Scans" },
             { id: "vulns", icon: Bug, label: "Vulnerabilities" },
-            { id: "chat", icon: Sparkles, label: "AI Assistant" },
+            ...(canChat ? [{ id: "chat", icon: Sparkles, label: "AI Assistant" }] : []),
             { id: "tools", icon: Zap, label: "Tools" },
-            { id: "settings", icon: Settings, label: "Settings" },
-          ].map((item) => (
+            ...(isAdmin ? [{ id: "settings", icon: Settings, label: "Settings" }] : []),
+          ] as { id: string; icon: any; label: string }[]).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
@@ -269,14 +295,34 @@ export default function Dashboard() {
 
         {/* Bottom section */}
         <div className="p-3 border-t border-white/[0.06]">
+          {/* Role badge */}
+          <div className="px-3 mb-2">
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider ${
+              user?.role === "admin"
+                ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                : user?.role === "developer"
+                ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                : "bg-[#71717a]/10 text-[#a1a1aa] border border-white/[0.06]"
+            }`}>
+              {user?.role === "admin" && <Crown className="w-3 h-3" />}
+              {user?.role}
+            </span>
+          </div>
           <div className="flex items-center gap-3 px-3 py-2">
             <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[11px] font-semibold text-white">
-              S
+              {user?.name?.[0]?.toUpperCase() || "U"}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-[12px] font-medium text-[#e4e4e7] truncate">Security Admin</p>
-              <p className="text-[10px] text-[#71717a]">admin@strix.pro</p>
+              <p className="text-[12px] font-medium text-[#e4e4e7] truncate">{user?.name || "User"}</p>
+              <p className="text-[10px] text-[#71717a] truncate">{user?.email || ""}</p>
             </div>
+            <button
+              onClick={logout}
+              className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all"
+              title="Logout"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
           </div>
         </div>
       </aside>
@@ -454,13 +500,15 @@ export default function Dashboard() {
                   <h3 className="text-sm font-semibold text-[#e4e4e7]">Targets</h3>
                   <p className="text-[12px] text-[#71717a] mt-0.5">{targets.length} monitored endpoints</p>
                 </div>
-                <button
-                  onClick={() => setShowAddTarget(true)}
-                  className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Target
-                </button>
+                {canEdit && (
+                  <button
+                    onClick={() => setShowAddTarget(true)}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Target
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -470,6 +518,7 @@ export default function Dashboard() {
                     target={target}
                     onScan={(id) => setShowScanModal({ targetId: id, targetName: target.name })}
                     index={i}
+                    canScan={canScan}
                   />
                 ))}
                 {targets.length === 0 && (
@@ -572,13 +621,13 @@ export default function Dashboard() {
           )}
 
           {/* AI Chat Tab */}
-          {activeTab === "chat" && <AIChat addToast={addToast} />}
+          {activeTab === "chat" && <AIChat addToast={addToast} authFetch={authFetch} />}
 
           {/* Tools Tab */}
           {activeTab === "tools" && <ToolsList />}
 
           {/* Settings Tab */}
-          {activeTab === "settings" && <SettingsPanel addToast={addToast} />}
+          {activeTab === "settings" && <SettingsPanel addToast={addToast} authFetch={authFetch} isAdmin={isAdmin} />}
         </div>
       </main>
 
@@ -715,10 +764,12 @@ function TargetCard({
   target,
   onScan,
   index,
+  canScan: canScanProp,
 }: {
   target: Target;
   onScan: (id: number) => void;
   index: number;
+  canScan: boolean;
 }) {
   const typeIcons: Record<string, { icon: any; color: string }> = {
     domain: { icon: Globe, color: "text-blue-400" },
@@ -755,13 +806,15 @@ function TargetCard({
         <span className="text-[10px] text-[#71717a]">
           Added {new Date(target.created_at).toLocaleDateString()}
         </span>
-        <button
-          onClick={() => onScan(target.id)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all duration-200"
-        >
-          <Play className="w-3 h-3" />
-          Scan
-        </button>
+        {canScanProp && (
+          <button
+            onClick={() => onScan(target.id)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all duration-200"
+          >
+            <Play className="w-3 h-3" />
+            Scan
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1055,7 +1108,7 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
 
 // ─── AI Chat ───────────────────────────────────────────────────────────────────
 
-function AIChat({ addToast }: { addToast: (msg: string, type: Toast["type"]) => void }) {
+function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response> }) {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1087,7 +1140,9 @@ function AIChat({ addToast }: { addToast: (msg: string, type: Toast["type"]) => 
         }),
       });
 
-      if (res.ok) {
+      if (res.status === 403) {
+        addToast("Insufficient permissions — AI chat requires developer or admin role", "error");
+      } else if (res.ok) {
         const data = await res.json();
         setMessages((prev) => [...prev, { role: "assistant", content: data.response }]);
       }
@@ -1267,7 +1322,7 @@ function ToolsList() {
 
 // ─── Settings Panel ────────────────────────────────────────────────────────────
 
-function SettingsPanel({ addToast }: { addToast: (msg: string, type: Toast["type"]) => void }) {
+function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; isAdmin: boolean }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [showKeys, setShowKeys] = useState<Set<string>>(new Set());
@@ -1285,7 +1340,7 @@ function SettingsPanel({ addToast }: { addToast: (msg: string, type: Toast["type
   const githubProvider = { key: "GITHUB_TOKEN", name: "GitHub Token", icon: "🐙" };
 
   useEffect(() => {
-    fetch(`${API_URL}/api/settings/api-keys`)
+    authFetch(`${API_URL}/api/settings/api-keys`)
       .then((res) => res.json())
       .then(setKeyStatus)
       .catch(console.error);
@@ -1299,7 +1354,7 @@ function SettingsPanel({ addToast }: { addToast: (msg: string, type: Toast["type
     }
     setSaving(provider);
     try {
-      const res = await fetch(`${API_URL}/api/settings/api-key`, {
+      const res = await authFetch(`${API_URL}/api/settings/api-key`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider, key: key.trim() }),
@@ -1415,6 +1470,9 @@ function SettingsPanel({ addToast }: { addToast: (msg: string, type: Toast["type
           </p>
         </div>
       </div>
+
+      {/* User Management (Admin Only) */}
+      {isAdmin && <UserManagement authFetch={authFetch} addToast={addToast} />}
     </div>
   );
 }
@@ -1519,6 +1577,102 @@ function EmptyStateLarge({
           {action}
         </button>
       )}
+    </div>
+  );
+}
+
+function UserManagement({ authFetch, addToast }: { authFetch: (url: string, opts?: RequestInit) => Promise<Response>; addToast: (msg: string, type: Toast["type"]) => void }) {
+  const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    authFetch(`${API_URL}/api/auth/users`)
+      .then((res) => res.json())
+      .then(setUsers)
+      .catch(() => addToast("Failed to load users", "error"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const changeRole = async (userId: number, role: string) => {
+    try {
+      const res = await authFetch(`${API_URL}/api/auth/users/${userId}/role`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role }),
+      });
+      if (res.ok) {
+        setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role } : u)));
+        addToast("Role updated", "success");
+      } else {
+        addToast("Failed to update role", "error");
+      }
+    } catch {
+      addToast("Failed to update role", "error");
+    }
+  };
+
+  const deleteUser = async (userId: number) => {
+    if (!confirm("Delete this user?")) return;
+    try {
+      const res = await authFetch(`${API_URL}/api/auth/users/${userId}`, { method: "DELETE" });
+      if (res.ok) {
+        setUsers((prev) => prev.filter((u) => u.id !== userId));
+        addToast("User deleted", "success");
+      } else {
+        addToast("Failed to delete user", "error");
+      }
+    } catch {
+      addToast("Failed to delete user", "error");
+    }
+  };
+
+  if (loading) return <div className="skeleton h-48 rounded-lg" />;
+
+  return (
+    <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2">
+          <Users className="w-4 h-4 text-indigo-400" />
+          <h4 className="text-[13px] font-semibold text-[#e4e4e7]">User Management</h4>
+        </div>
+        <p className="text-[11px] text-[#71717a] mt-0.5">Manage user accounts and roles</p>
+      </div>
+      <div className="divide-y divide-white/[0.04]">
+        {users.map((u) => (
+          <div key={u.id} className="flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[11px] font-semibold text-white">
+                {(u.name || u.email)[0].toUpperCase()}
+              </div>
+              <div>
+                <p className="text-[13px] font-medium text-[#e4e4e7]">{u.name || "—"}</p>
+                <p className="text-[11px] text-[#71717a]">{u.email}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <select
+                value={u.role}
+                onChange={(e) => changeRole(u.id, e.target.value)}
+                className="text-[11px] bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1 text-[#a1a1aa] focus:outline-none focus:border-indigo-500/50"
+              >
+                <option value="admin">Admin</option>
+                <option value="developer">Developer</option>
+                <option value="viewer">Viewer</option>
+              </select>
+              <button
+                onClick={() => deleteUser(u.id)}
+                className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all"
+                title="Delete user"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        ))}
+        {users.length === 0 && (
+          <div className="py-8 text-center text-[13px] text-[#71717a]">No users found</div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 """
 Strix Pro - Main Application
-FastAPI backend with REST API and WebSocket support
+FastAPI backend with REST API, WebSocket support, and RBAC
 """
 
 import os
@@ -33,6 +33,11 @@ from src.db.models import (
 from src.api.auth_routes import router as auth_router
 from src.api.github_routes import router as github_router
 from src.api.report_routes import router as report_router
+
+# Import RBAC dependencies
+from src.services.auth import (
+    require_admin, require_developer_or_admin, require_any_role, get_current_user_dep
+)
 
 # Initialize components
 ai_router = AIRouter()
@@ -185,8 +190,12 @@ async def get_providers():
 
 # Targets
 @app.post("/api/targets", response_model=TargetResponse)
-async def create_target_endpoint(target: TargetCreate, db=Depends(get_db)):
-    """Create a new target"""
+async def create_target_endpoint(
+    target: TargetCreate,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Create a new target (developer+ only)"""
     return create_target(
         db,
         name=target.name,
@@ -197,21 +206,32 @@ async def create_target_endpoint(target: TargetCreate, db=Depends(get_db)):
     )
 
 @app.get("/api/targets", response_model=List[TargetResponse])
-async def list_targets(db=Depends(get_db)):
-    """List all targets"""
+async def list_targets(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all targets (all roles)"""
     return db.query(Target).order_by(Target.created_at.desc()).all()
 
 @app.get("/api/targets/{target_id}", response_model=TargetResponse)
-async def get_target(target_id: int, db=Depends(get_db)):
-    """Get target by ID"""
+async def get_target(
+    target_id: int,
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get target by ID (all roles)"""
     target = db.query(Target).filter(Target.id == target_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
     return target
 
 @app.delete("/api/targets/{target_id}")
-async def delete_target(target_id: int, db=Depends(get_db)):
-    """Delete target"""
+async def delete_target(
+    target_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Delete target (developer+ only)"""
     target = db.query(Target).filter(Target.id == target_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
@@ -221,8 +241,12 @@ async def delete_target(target_id: int, db=Depends(get_db)):
 
 # Scans
 @app.post("/api/scans", response_model=ScanResponse)
-async def create_scan_endpoint(request: ScanRequest, db=Depends(get_db)):
-    """Create and execute a scan"""
+async def create_scan_endpoint(
+    request: ScanRequest,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Create and execute a scan (developer+ only)"""
     # Verify target exists
     target = db.query(Target).filter(Target.id == request.target_id).first()
     if not target:
@@ -329,9 +353,10 @@ async def list_scans(
     target_id: Optional[int] = None,
     status: Optional[str] = None,
     limit: int = Query(50, le=100),
-    db=Depends(get_db)
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
 ):
-    """List scans"""
+    """List scans (all roles)"""
     query = db.query(Scan)
     if target_id:
         query = query.filter(Scan.target_id == target_id)
@@ -340,16 +365,24 @@ async def list_scans(
     return query.order_by(Scan.created_at.desc()).limit(limit).all()
 
 @app.get("/api/scans/{scan_id}", response_model=ScanResponse)
-async def get_scan(scan_id: int, db=Depends(get_db)):
-    """Get scan by ID"""
+async def get_scan(
+    scan_id: int,
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get scan by ID (all roles)"""
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
     return scan
 
 @app.post("/api/scans/{scan_id}/cancel")
-async def cancel_scan(scan_id: int, db=Depends(get_db)):
-    """Cancel a running scan"""
+async def cancel_scan(
+    scan_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Cancel a running scan (developer+ only)"""
     scan = db.query(Scan).filter(Scan.id == scan_id).first()
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -365,9 +398,10 @@ async def list_vulnerabilities(
     severity: Optional[str] = None,
     is_fixed: Optional[bool] = None,
     limit: int = Query(100, le=500),
-    db=Depends(get_db)
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
 ):
-    """List vulnerabilities"""
+    """List vulnerabilities (all roles)"""
     query = db.query(Vulnerability)
     if target_id:
         query = query.filter(Vulnerability.target_id == target_id)
@@ -378,8 +412,11 @@ async def list_vulnerabilities(
     return query.order_by(Vulnerability.created_at.desc()).limit(limit).all()
 
 @app.get("/api/vulnerabilities/stats")
-async def vulnerability_stats(db=Depends(get_db)):
-    """Get vulnerability statistics"""
+async def vulnerability_stats(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get vulnerability statistics (all roles)"""
     total = db.query(Vulnerability).count()
     by_severity = {}
     for severity in SeverityLevel:
@@ -397,8 +434,12 @@ async def vulnerability_stats(db=Depends(get_db)):
     }
 
 @app.patch("/api/vulnerabilities/{vuln_id}/confirm")
-async def confirm_vulnerability(vuln_id: int, db=Depends(get_db)):
-    """Confirm a vulnerability"""
+async def confirm_vulnerability(
+    vuln_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Confirm a vulnerability (developer+ only)"""
     vuln = db.query(Vulnerability).filter(Vulnerability.id == vuln_id).first()
     if not vuln:
         raise HTTPException(status_code=404, detail="Vulnerability not found")
@@ -407,8 +448,12 @@ async def confirm_vulnerability(vuln_id: int, db=Depends(get_db)):
     return {"message": "Vulnerability confirmed"}
 
 @app.patch("/api/vulnerabilities/{vuln_id}/fix")
-async def mark_fixed(vuln_id: int, db=Depends(get_db)):
-    """Mark vulnerability as fixed"""
+async def mark_fixed(
+    vuln_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Mark vulnerability as fixed (developer+ only)"""
     vuln = db.query(Vulnerability).filter(Vulnerability.id == vuln_id).first()
     if not vuln:
         raise HTTPException(status_code=404, detail="Vulnerability not found")
@@ -419,8 +464,12 @@ async def mark_fixed(vuln_id: int, db=Depends(get_db)):
 
 # AI Chat
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest, db=Depends(get_db)):
-    """Chat with AI assistant"""
+async def chat_endpoint(
+    request: ChatRequest,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Chat with AI assistant (developer+ only)"""
     
     # Get chat history
     history = db.query(ChatHistory).filter(
@@ -558,8 +607,13 @@ Be technical, precise, and always prioritize security."""
         raise HTTPException(status_code=500, detail=error_msg)
 
 @app.get("/api/chat/history/{session_id}")
-async def get_chat_history(session_id: str, limit: int = 50, db=Depends(get_db)):
-    """Get chat history for session"""
+async def get_chat_history(
+    session_id: str,
+    limit: int = 50,
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get chat history for session (all roles)"""
     history = db.query(ChatHistory).filter(
         ChatHistory.session_id == session_id
     ).order_by(ChatHistory.created_at.desc()).limit(limit).all()
@@ -568,12 +622,12 @@ async def get_chat_history(session_id: str, limit: int = 50, db=Depends(get_db))
 # Tools
 @app.get("/api/tools")
 async def list_tools():
-    """List available security tools"""
+    """List available security tools (no auth required)"""
     return tool_engine.get_tools_list()
 
 @app.get("/api/tools/installed")
 async def check_installed_tools():
-    """Check which tools are installed"""
+    """Check which tools are installed (no auth required)"""
     tools = tool_engine.get_tools_list()
     installed = []
     not_installed = []
@@ -606,8 +660,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 # Dashboard stats
 @app.get("/api/dashboard/stats")
-async def dashboard_stats(db=Depends(get_db)):
-    """Get dashboard statistics"""
+async def dashboard_stats(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """Get dashboard statistics (all roles)"""
     total_targets = db.query(Target).count()
     total_scans = db.query(Scan).count()
     running_scans = db.query(Scan).filter(Scan.status == ScanStatus.RUNNING.value).count()
@@ -634,8 +691,13 @@ async def dashboard_stats(db=Depends(get_db)):
 
 # Reports
 @app.post("/api/reports/generate")
-async def generate_report(target_id: Optional[int] = None, report_type: str = "full", db=Depends(get_db)):
-    """Generate a security report"""
+async def generate_report(
+    target_id: Optional[int] = None,
+    report_type: str = "full",
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Generate a security report (developer+ only)"""
     # Get data
     if target_id:
         target = db.query(Target).filter(Target.id == target_id).first()
@@ -706,8 +768,11 @@ async def generate_report(target_id: Optional[int] = None, report_type: str = "f
     }
 
 @app.get("/api/reports", response_model=List[Dict])
-async def list_reports(db=Depends(get_db)):
-    """List generated reports"""
+async def list_reports(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List generated reports (all roles)"""
     reports = db.query(Report).order_by(Report.created_at.desc()).all()
     return [
         {
@@ -722,8 +787,16 @@ async def list_reports(db=Depends(get_db)):
 
 # Scheduler endpoints
 @app.post("/api/schedules")
-async def create_schedule(target_id: int, name: str, scan_type: str, cron_expression: str, tool: str = None, db=Depends(get_db)):
-    """Create a new scan schedule"""
+async def create_schedule(
+    target_id: int,
+    name: str,
+    scan_type: str,
+    cron_expression: str,
+    tool: str = None,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
+    """Create a new scan schedule (developer+ only)"""
     target = db.query(Target).filter(Target.id == target_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="Target not found")
@@ -737,12 +810,19 @@ async def create_schedule(target_id: int, name: str, scan_type: str, cron_expres
     return schedule
 
 @app.get("/api/schedules")
-async def list_schedules(db=Depends(get_db)):
-    """List all scan schedules"""
+async def list_schedules(
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all scan schedules (all roles)"""
     return db.query(ScanSchedule).order_by(ScanSchedule.created_at.desc()).all()
 
 @app.patch("/api/schedules/{schedule_id}/pause")
-async def pause_schedule(schedule_id: int, db=Depends(get_db)):
+async def pause_schedule(
+    schedule_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
     schedule = db.query(ScanSchedule).filter(ScanSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -751,7 +831,11 @@ async def pause_schedule(schedule_id: int, db=Depends(get_db)):
     return {"message": "Schedule paused"}
 
 @app.patch("/api/schedules/{schedule_id}/resume")
-async def resume_schedule(schedule_id: int, db=Depends(get_db)):
+async def resume_schedule(
+    schedule_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
     schedule = db.query(ScanSchedule).filter(ScanSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -760,7 +844,11 @@ async def resume_schedule(schedule_id: int, db=Depends(get_db)):
     return {"message": "Schedule resumed"}
 
 @app.delete("/api/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: int, db=Depends(get_db)):
+async def delete_schedule(
+    schedule_id: int,
+    user: User = Depends(require_developer_or_admin),
+    db=Depends(get_db),
+):
     schedule = db.query(ScanSchedule).filter(ScanSchedule.id == schedule_id).first()
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -768,10 +856,12 @@ async def delete_schedule(schedule_id: int, db=Depends(get_db)):
     db.commit()
     return {"message": "Schedule deleted"}
 
-# Settings endpoints
+# Settings endpoints (Admin only)
 @app.get("/api/settings/api-keys")
-async def get_api_keys_status():
-    """Get status of configured API keys (never return actual keys)"""
+async def get_api_keys_status(
+    user: User = Depends(require_admin),
+):
+    """Get status of configured API keys (admin only)"""
     keys = {
         "GOOGLE_API_KEY": bool(os.getenv("GOOGLE_API_KEY")),
         "OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
@@ -783,8 +873,11 @@ async def get_api_keys_status():
     return keys
 
 @app.post("/api/settings/api-key")
-async def update_api_key(request: dict):
-    """Update an API key in .env file"""
+async def update_api_key(
+    request: dict,
+    user: User = Depends(require_admin),
+):
+    """Update an API key in .env file (admin only)"""
     provider = request.get("provider")
     key = request.get("key")
     if not provider or not key:

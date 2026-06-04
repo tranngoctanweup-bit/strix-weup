@@ -41,11 +41,11 @@ WORKDIR /app
 COPY src/ ./src/
 COPY cli.py .
 COPY setup.py .
-COPY README.md .
+COPY .env.example ./.env.example
 
 # Create non-root user
 RUN groupadd -r strix && useradd -r -g strix -d /app -s /sbin/nologin strix \
-    && mkdir -p /app/reports /home/strix/.strix \
+    && mkdir -p /app/reports /app/data/reports /home/strix/.strix \
     && chown -R strix:strix /app /home/strix/.strix
 
 USER strix
