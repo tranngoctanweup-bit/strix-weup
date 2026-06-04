@@ -1,0 +1,73 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Strix Pro - Docker Compose
+# Runs backend API + frontend together
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+  # ── Backend API ──────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: strix-backend
+    restart: unless-stopped
+    ports:
+      - "${STRIX_PORT:-8000}:8000"
+    environment:
+      - STRIX_ENV=production
+      - STRIX_API_URL=http://localhost:8000
+      - STRIX_SECRET_KEY=${STRIX_SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./strix.db}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
+      - STRIX_AUTH_ENABLED=${STRIX_AUTH_ENABLED:-true}
+      - STRIX_JWT_ALGORITHM=${STRIX_JWT_ALGORITHM:-HS256}
+      - STRIX_JWT_EXPIRE_MINUTES=${STRIX_JWT_EXPIRE_MINUTES:-1440}
+      - STRIX_SCHEDULER_ENABLED=${STRIX_SCHEDULER_ENABLED:-true}
+      - STRIX_SCHEDULER_TIMEZONE=${STRIX_SCHEDULER_TIMEZONE:-UTC}
+      - STRIX_REPORTS_DIR=/app/reports
+      - STRIX_LOG_LEVEL=${STRIX_LOG_LEVEL:-INFO}
+    volumes:
+      - strix-data:/app/reports
+      - strix-db:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - strix-net
+
+  # ── Frontend ─────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: strix-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - NODE_ENV=production
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - strix-net
+
+volumes:
+  strix-data:
+    driver: local
+  strix-db:
+    driver: local
+
+networks:
+  strix-net:
+    driver: bridge

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ report.target.name if report.target else "All Targets" }} - Security Report</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; padding: 40px; }
+        .header { text-align: center; margin-bottom: 40px; border-bottom: 3px solid #2563eb; padding-bottom: 20px; }
+        .header h1 { color: #1e40af; font-size: 28px; }
+        .header .subtitle { color: #6b7280; font-size: 14px; margin-top: 5px; }
+        .section { margin-bottom: 30px; }
+        .section h2 { color: #1e40af; font-size: 20px; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; margin-bottom: 15px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; text-align: center; }
+        .stat-card .value { font-size: 32px; font-weight: bold; }
+        .stat-card .label { font-size: 12px; color: #6b7280; margin-top: 5px; }
+        .stat-card.critical { border-color: #dc2626; }
+        .stat-card.critical .value { color: #dc2626; }
+        .stat-card.high { border-color: #ea580c; }
+        .stat-card.high .value { color: #ea580c; }
+        .stat-card.medium { border-color: #ca8a04; }
+        .stat-card.medium .value { color: #ca8a04; }
+        .stat-card.low { border-color: #2563eb; }
+        .stat-card.low .value { color: #2563eb; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+        th { background: #f3f4f6; font-weight: 600; color: #374151; }
+        .severity { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+        .severity.critical { background: #fef2f2; color: #dc2626; }
+        .severity.high { background: #fff7ed; color: #ea580c; }
+        .severity.medium { background: #fefce8; color: #ca8a04; }
+        .severity.low { background: #eff6ff; color: #2563eb; }
+        .severity.info { background: #f9fafb; color: #6b7280; }
+        .status { padding: 3px 8px; border-radius: 4px; font-size: 11px; }
+        .status.completed { background: #f0fdf4; color: #16a34a; }
+        .status.failed { background: #fef2f2; color: #dc2626; }
+        .status.running { background: #eff6ff; color: #2563eb; }
+        .footer { margin-top: 40px; text-align: center; color: #9ca3af; font-size: 12px; border-top: 1px solid #e5e7eb; padding-top: 20px; }
+        .remediation { background: #f0fdf4; border-left: 4px solid #16a34a; padding: 10px; margin-top: 5px; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Strix Pro Security Report</h1>
+        <div class="subtitle">
+            Generated: {{ report.generated_at }}<br>
+            {% if report.target %}
+            Target: {{ report.target.name }} ({{ report.target.host }})
+            {% else %}
+            All Targets
+            {% endif %}
+            &nbsp;|&nbsp; Type: {{ report.report_type }}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Executive Summary</h2>
+        <div class="stats-grid">
+            <div class="stat-card"><div class="value">{{ report.summary.total_scans }}</div><div class="label">Total Scans</div></div>
+            <div class="stat-card critical"><div class="value">{{ report.summary.critical }}</div><div class="label">Critical</div></div>
+            <div class="stat-card high"><div class="value">{{ report.summary.high }}</div><div class="label">High</div></div>
+            <div class="stat-card medium"><div class="value">{{ report.summary.medium }}</div><div class="label">Medium</div></div>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-card low"><div class="value">{{ report.summary.low }}</div><div class="label">Low</div></div>
+            <div class="stat-card"><div class="value">{{ report.summary.total_vulnerabilities }}</div><div class="label">Total Vulns</div></div>
+            <div class="stat-card"><div class="value">{{ report.summary.fixed }}</div><div class="label">Fixed</div></div>
+            <div class="stat-card"><div class="value">{{ report.summary.unfixed }}</div><div class="label">Unfixed</div></div>
+        </div>
+    </div>
+
+    {% if report.vulnerabilities %}
+    <div class="section">
+        <h2>Vulnerabilities</h2>
+        <table>
+            <thead><tr><th>ID</th><th>Title</th><th>Severity</th><th>CVE</th><th>Component</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for v in report.vulnerabilities %}
+            <tr>
+                <td>#{{ v.id }}</td>
+                <td>{{ v.title }}</td>
+                <td><span class="severity {{ v.severity }}">{{ v.severity }}</span></td>
+                <td>{{ v.cve_id or "-" }}</td>
+                <td>{{ v.affected_component or "-" }}</td>
+                <td>{% if v.is_fixed %}<span class="status completed">Fixed</span>{% else %}<span class="status failed">Open</span>{% endif %}</td>
+            </tr>
+            {% if v.remediation %}
+            <tr><td colspan="6"><div class="remediation"><strong>Remediation:</strong> {{ v.remediation }}</div></td></tr>
+            {% endif %}
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if report.scans %}
+    <div class="section">
+        <h2>Scan History</h2>
+        <table>
+            <thead><tr><th>ID</th><th>Type</th><th>Tool</th><th>Status</th><th>Duration</th><th>Date</th></tr></thead>
+            <tbody>
+            {% for s in report.scans %}
+            <tr>
+                <td>#{{ s.id }}</td>
+                <td>{{ s.type }}</td>
+                <td>{{ s.tool or "auto" }}</td>
+                <td><span class="status {{ s.status }}">{{ s.status }}</span></td>
+                <td>{{ s.duration or "-" }}s</td>
+                <td>{{ s.created_at or "-" }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        Strix Pro - AI-Powered Security Platform<br>
+        This report was automatically generated. Please review findings carefully.
+    </div>
+</body>
+</html>
