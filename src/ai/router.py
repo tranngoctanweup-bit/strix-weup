@@ -14,6 +14,7 @@ class AIProvider(Enum):
     ANTHROPIC = "anthropic"
     GROQ = "groq"
     MISTRAL = "mistral"
+    CUSTOM = "custom"
 
 @dataclass
 class AIMessage:
@@ -110,6 +111,21 @@ class AIRouter:
                 }
             except ImportError:
                 pass
+        
+        # Custom OpenAI-compatible provider (e.g. Xiaomi, DeepSeek, etc.)
+        custom_key = os.getenv("CUSTOM_API_KEY")
+        custom_base_url = os.getenv("CUSTOM_BASE_URL")
+        if custom_key and custom_base_url:
+            try:
+                import openai
+                self.providers[AIProvider.CUSTOM] = {
+                    "key": custom_key,
+                    "base_url": custom_base_url,
+                    "client": openai.OpenAI(api_key=custom_key, base_url=custom_base_url),
+                    "models": os.getenv("CUSTOM_MODELS", "mimo-v2.5-pro").split(",")
+                }
+            except ImportError:
+                pass
     
     def get_available_providers(self) -> Dict[str, List[str]]:
         """Get list of available providers and their models"""
@@ -146,6 +162,8 @@ class AIRouter:
             return self._chat_groq(provider_info, model, messages, tools, temperature, max_tokens)
         elif ai_provider == AIProvider.MISTRAL:
             return self._chat_mistral(provider_info, model, messages, tools, temperature, max_tokens)
+        elif ai_provider == AIProvider.CUSTOM:
+            return self._chat_custom(provider_info, model, messages, tools, temperature, max_tokens)
         else:
             raise ValueError(f"Unsupported provider: {provider}")
     
@@ -254,6 +272,58 @@ class AIRouter:
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens
+            }
+        )
+    
+    def _chat_custom(self, provider_info, model, messages, tools, temperature, max_tokens):
+        """Chat using custom OpenAI-compatible provider (e.g. Xiaomi, DeepSeek)"""
+        client = provider_info["client"]
+        
+        openai_messages = []
+        for msg in messages:
+            openai_msg = {"role": msg.role, "content": msg.content}
+            if msg.tool_call_id:
+                openai_msg["tool_call_id"] = msg.tool_call_id
+            if msg.tool_calls:
+                openai_msg["tool_calls"] = msg.tool_calls
+            openai_messages.append(openai_msg)
+        
+        kwargs = {
+            "model": model,
+            "messages": openai_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        if tools:
+            kwargs["tools"] = self._convert_tools_to_openai(tools)
+        
+        response = client.chat.completions.create(**kwargs)
+        
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        tool_calls = None
+        
+        if choice.message.tool_calls:
+            tool_calls = []
+            for tc in choice.message.tool_calls:
+                tool_calls.append({
+                    "id": tc.id,
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments
+                    }
+                })
+        
+        return AIResponse(
+            content=content,
+            tool_calls=tool_calls,
+            provider="custom",
+            model=model,
+            usage={
+                "prompt_tokens": getattr(response.usage, "prompt_tokens", 0) if response.usage else 0,
+                "completion_tokens": getattr(response.usage, "completion_tokens", 0) if response.usage else 0,
+                "total_tokens": getattr(response.usage, "total_tokens", 0) if response.usage else 0
             }
         )
     

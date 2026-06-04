@@ -2085,13 +2085,14 @@ function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["
         <div className="flex items-center gap-2">
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value)}
+            onChange={(e) => { setProvider(e.target.value); if (e.target.value === "custom") setModel("mimo-v2.5-pro"); }}
             className="text-[11px] bg-white/[0.04] border border-white/[0.06] rounded px-2 py-1 text-[#a1a1aa] focus:outline-none focus:border-indigo-500/50"
           >
             <option value="gemini">Gemini</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
             <option value="groq">Groq</option>
+            <option value="custom">Custom (Xiaomi)</option>
           </select>
           <select
             value={model}
@@ -2237,6 +2238,15 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
 
+  // Custom provider state
+  const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [customModels, setCustomModels] = useState("mimo-v2.5-pro");
+  const [customProviderSaved, setCustomProviderSaved] = useState(false);
+  const [customProviderStatus, setCustomProviderStatus] = useState({ base_url: "", api_key_set: false, models: [] as string[] });
+  const [savingCustom, setSavingCustom] = useState(false);
+  const [showCustomKey, setShowCustomKey] = useState(false);
+
   const providers = [
     { key: "GOOGLE_API_KEY", name: "Google (Gemini)", icon: "🔮" },
     { key: "OPENAI_API_KEY", name: "OpenAI (GPT-4)", icon: "🤖" },
@@ -2251,6 +2261,15 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
     authFetch(`${API_URL}/api/settings/api-keys`)
       .then((res) => res.json())
       .then(setKeyStatus)
+      .catch(console.error);
+    // Fetch custom provider settings
+    authFetch(`${API_URL}/api/settings/custom-provider`)
+      .then((res) => res.json())
+      .then((data) => {
+        setCustomProviderStatus(data);
+        if (data.base_url) setCustomBaseUrl(data.base_url);
+        if (data.models?.length) setCustomModels(data.models.join(","));
+      })
       .catch(console.error);
   }, []);
 
@@ -2354,6 +2373,100 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
           <p className="text-[11px] text-[#71717a] mt-0.5">For GitHub integration features</p>
         </div>
         <div className="p-5">{renderKeyRow(githubProvider)}</div>
+      </div>
+
+      {/* Custom AI Provider (e.g. Xiaomi, DeepSeek) */}
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+        <div className="px-5 py-4 border-b border-white/[0.06]">
+          <div className="flex items-center gap-2">
+            <h4 className="text-[13px] font-semibold text-[#e4e4e7]">Custom AI Provider</h4>
+            {customProviderStatus.api_key_set && (
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+            )}
+          </div>
+          <p className="text-[11px] text-[#71717a] mt-0.5">OpenAI-compatible API (Xiaomi, DeepSeek, etc.)</p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-[12px] font-medium text-[#a1a1aa] mb-1.5">Base URL</label>
+            <input
+              type="text"
+              value={customBaseUrl}
+              onChange={(e) => setCustomBaseUrl(e.target.value)}
+              placeholder="https://api.example.com/v1"
+              className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-[#a1a1aa] mb-1.5">API Key</label>
+            <div className="flex items-center gap-2">
+              <input
+                type={showCustomKey ? "text" : "password"}
+                value={customApiKey}
+                onChange={(e) => setCustomApiKey(e.target.value)}
+                placeholder={customProviderStatus.api_key_set ? "Key configured — enter new key to replace" : "Enter API key..."}
+                className="flex-1 px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+              />
+              <button
+                onClick={() => setShowCustomKey(!showCustomKey)}
+                className="p-2 rounded text-[#71717a] hover:text-[#a1a1aa] hover:bg-white/[0.04] transition-all"
+              >
+                {showCustomKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-[12px] font-medium text-[#a1a1aa] mb-1.5">Models (comma-separated)</label>
+            <input
+              type="text"
+              value={customModels}
+              onChange={(e) => setCustomModels(e.target.value)}
+              placeholder="mimo-v2.5-pro, mimo-v2-flash"
+              className="w-full px-3 py-2 bg-[#0a0a0f] border border-white/[0.06] rounded-md text-[13px] text-[#e4e4e7] placeholder-[#71717a] font-mono focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+          <button
+            onClick={async () => {
+              if (!customBaseUrl.trim() || !customApiKey.trim()) {
+                addToast("Base URL and API Key are required", "error");
+                return;
+              }
+              setSavingCustom(true);
+              try {
+                const res = await authFetch(`${API_URL}/api/settings/custom-provider`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ base_url: customBaseUrl, api_key: customApiKey, models: customModels }),
+                });
+                if (res.ok) {
+                  const data = await res.json();
+                  addToast("Custom provider configured! Models: " + data.models?.join(", "), "success");
+                  setCustomProviderSaved(true);
+                  setCustomApiKey("");
+                  // Refresh status
+                  const statusRes = await authFetch(`${API_URL}/api/settings/custom-provider`);
+                  if (statusRes.ok) setCustomProviderStatus(await statusRes.json());
+                } else {
+                  addToast("Failed to save custom provider", "error");
+                }
+              } catch {
+                addToast("Failed to save — is the backend running?", "error");
+              } finally {
+                setSavingCustom(false);
+              }
+            }}
+            disabled={savingCustom || !customBaseUrl.trim() || !customApiKey.trim()}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-md text-[13px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-500/20"
+          >
+            {savingCustom ? "Saving..." : "Save Custom Provider"}
+          </button>
+          {customProviderStatus.api_key_set && (
+            <div className="flex items-center gap-2 text-[12px] text-green-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Provider configured: {customProviderStatus.base_url}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">

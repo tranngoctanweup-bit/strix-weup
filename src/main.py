@@ -869,6 +869,8 @@ async def get_api_keys_status(
         "GROQ_API_KEY": bool(os.getenv("GROQ_API_KEY")),
         "MISTRAL_API_KEY": bool(os.getenv("MISTRAL_API_KEY")),
         "GITHUB_TOKEN": bool(os.getenv("GITHUB_TOKEN")),
+        "CUSTOM_API_KEY": bool(os.getenv("CUSTOM_API_KEY")),
+        "CUSTOM_BASE_URL": bool(os.getenv("CUSTOM_BASE_URL")),
     }
     return keys
 
@@ -910,6 +912,69 @@ async def update_api_key(
     os.environ[provider] = key
     
     return {"message": f"{provider} updated successfully"}
+
+@app.post("/api/settings/custom-provider")
+async def update_custom_provider(
+    request: dict,
+    user: User = Depends(require_admin),
+):
+    """Update custom AI provider settings (admin only)"""
+    base_url = request.get("base_url", "").strip()
+    api_key = request.get("api_key", "").strip()
+    models = request.get("models", "mimo-v2.5-pro").strip()
+    
+    if not base_url or not api_key:
+        raise HTTPException(status_code=400, detail="Base URL and API Key are required")
+    
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            lines = f.readlines()
+    
+    # Update or add custom provider settings
+    env_vars = {
+        "CUSTOM_BASE_URL": base_url,
+        "CUSTOM_API_KEY": api_key,
+        "CUSTOM_MODELS": models,
+    }
+    
+    for var_name, var_value in env_vars.items():
+        found = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{var_name}="):
+                lines[i] = f"{var_name}={var_value}\n"
+                found = True
+                break
+        if not found:
+            lines.append(f"{var_name}={var_value}\n")
+    
+    with open(env_path, 'w') as f:
+        f.writelines(lines)
+    
+    # Update runtime env
+    for var_name, var_value in env_vars.items():
+        os.environ[var_name] = var_value
+    
+    # Reinitialize AI router to pick up new provider
+    try:
+        ai_router._init_providers()
+    except Exception as e:
+        print(f"Warning: Failed to reinitialize AI providers: {e}")
+    
+    return {"message": "Custom provider configured successfully", "models": models.split(",")}
+
+@app.get("/api/settings/custom-provider")
+async def get_custom_provider(
+    user: User = Depends(require_admin),
+):
+    """Get custom AI provider settings (admin only)"""
+    return {
+        "base_url": os.getenv("CUSTOM_BASE_URL", ""),
+        "api_key_set": bool(os.getenv("CUSTOM_API_KEY")),
+        "models": os.getenv("CUSTOM_MODELS", "mimo-v2.5-pro").split(","),
+    }
 
 # Health check
 @app.get("/health")
