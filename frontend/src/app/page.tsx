@@ -907,9 +907,20 @@ export default function Dashboard() {
                     <tbody className="divide-y divide-white/[0.04]">
                       {scans.map((scan) => {
                         const target = targets.find(t => t.id === scan.target_id);
+                        const isRunning = scan.status === "running";
                         return (
-                          <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
-                            <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
+                          <tr key={scan.id} className={`hover:bg-white/[0.02] transition-colors ${isRunning ? "bg-blue-500/[0.03]" : ""}`}>
+                            <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">
+                              <div className="flex items-center gap-2">
+                                {isRunning && (
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                                  </span>
+                                )}
+                                #{scan.id}
+                              </div>
+                            </td>
                             <td className="px-5 py-3">
                               <div>
                                 <p className="text-[13px] text-[#e4e4e7] font-medium">{target?.name || `Target #${scan.target_id}`}</p>
@@ -923,7 +934,14 @@ export default function Dashboard() {
                             <td className="px-5 py-3">
                               <StatusBadge status={scan.status} />
                             </td>
-                            <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
+                            <td className="px-5 py-3 text-[13px] text-[#71717a]">
+                              {scan.duration ? `${scan.duration}s` : isRunning ? (
+                                <span className="text-blue-400 flex items-center gap-1.5">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  running...
+                                </span>
+                              ) : "—"}
+                            </td>
                             <td className="px-5 py-3">
                               <div className="flex items-center gap-2">
                                 <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
@@ -1231,15 +1249,29 @@ export default function Dashboard() {
                             Added {new Date(target.created_at).toLocaleDateString()}
                           </span>
                           <div className="flex items-center gap-2">
-                            {canScan && (
-                              <button
-                                onClick={() => setShowScanModal({ targetId: target.id, targetName: target.name })}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all duration-200"
-                              >
-                                <Play className="w-3 h-3" />
-                                Scan
-                              </button>
-                            )}
+                            {canScan && (() => {
+                              const runningScan = targetScans.find(s => s.status === "running");
+                              if (runningScan) {
+                                return (
+                                  <button
+                                    disabled
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-blue-400 bg-blue-500/10 border border-blue-500/20 cursor-wait"
+                                  >
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                    Scanning...
+                                  </button>
+                                );
+                              }
+                              return (
+                                <button
+                                  onClick={() => setShowScanModal({ targetId: target.id, targetName: target.name })}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 transition-all duration-200"
+                                >
+                                  <Play className="w-3 h-3" />
+                                  Scan
+                                </button>
+                              );
+                            })()}
                             {canEdit && (
                               <button
                                 onClick={async () => {
@@ -2507,7 +2539,8 @@ function StatusBadge({ status }: { status: string }) {
   };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${styles[status] || "bg-white/[0.04] text-[#71717a]"}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium ${styles[status] || "bg-white/[0.04] text-[#71717a]"}`}>
+      {status === "running" && <Loader2 className="w-3 h-3 animate-spin" />}
       {status}
     </span>
   );
