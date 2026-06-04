@@ -2302,6 +2302,7 @@ function LogsTab({ authFetch, addToast, isAdmin }: { authFetch: (url: string, op
   const [liveTail, setLiveTail] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -2451,6 +2452,10 @@ function LogsTab({ authFetch, addToast, isAdmin }: { authFetch: (url: string, op
             <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} className="rounded" />
             Auto-scroll
           </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-[#71717a] cursor-pointer">
+            <input type="checkbox" checked={showHistory} onChange={e => { setShowHistory(e.target.checked); if (e.target.checked) { /* fetch from DB */ authFetch(`${API_URL}/api/logs?history=true&limit=200`).then(r => r.json()).then(d => { if (d.logs) setLogs(d.logs); }); } }} className="rounded" />
+            History (DB)
+          </label>
           {isAdmin && (
             <button onClick={handleClear} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Clear logs">
               <X className="w-3.5 h-3.5" />
@@ -2466,6 +2471,8 @@ function LogsTab({ authFetch, addToast, isAdmin }: { authFetch: (url: string, op
         <span>Errors: <span className="text-red-400 font-medium">{(stats.by_level?.error || 0) + (stats.by_level?.critical || 0)}</span></span>
         <span>Warnings: <span className="text-yellow-400 font-medium">{stats.by_level?.warning || 0}</span></span>
         <span>Showing: <span className="text-indigo-400 font-medium">{filteredLogs.length}</span></span>
+        {stats.total_persisted > 0 && <span>Persisted: <span className="text-green-400 font-medium">{stats.total_persisted}</span></span>}
+        <span className="ml-auto text-[9px] text-[#52525b]">Loki webhook: POST /api/logs/webhook/loki · Retention: {stats.retention_days || 90}d</span>
       </div>
 
       {/* Log Viewer (Grafana-style) */}

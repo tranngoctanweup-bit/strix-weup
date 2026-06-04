@@ -323,3 +323,23 @@ class SourceCodeScan(Base):
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Log(Base):
+    """Persistent log entry (Loki webhook + internal)"""
+    __tablename__ = "logs"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    level = Column(String(20), default="info", index=True)  # debug, info, warning, error, critical
+    source = Column(String(50), default="system", index=True)  # backend, frontend, scanner, system, loki
+    component = Column(String(100), default="")  # http, auth, scanner, etc.
+    message = Column(Text, nullable=False)
+    metadata = Column(JSON, default=dict)  # extra fields from Loki
+    labels = Column(JSON, default=dict)  # Loki labels (job, instance, etc.)
+    raw = Column(Text)  # raw Loki payload for debugging
+    
+    # Indexes for fast queries
+    __table_args__ = (
+        {'mysql_charset': 'utf8mb4'},
+    )

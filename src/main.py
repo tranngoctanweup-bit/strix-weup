@@ -29,7 +29,7 @@ from src.core.tool_engine import ToolEngine
 from src.db.models import (
     init_db, get_db, Target, Scan, Vulnerability, ScanSchedule,
     ChatHistory, Report, User, ScanStatus, SeverityLevel,
-    Repository, NetworkRange, Integration, SourceCodeScan,
+    Repository, NetworkRange, Integration, SourceCodeScan, Log,
     create_target, create_scan, update_scan_status, create_vulnerability
 )
 
@@ -141,6 +141,16 @@ async def lifespan(app: FastAPI):
     print("✅ Database initialized")
     print(f"🤖 Available AI providers: {list(ai_router.get_available_providers().keys())}")
     print(f"🔧 Available tools: {len(tool_engine.get_tools_list())}")
+    
+    # Log retention cleanup on startup
+    try:
+        deleted = log_store.cleanup_old_logs(days=90)
+        if deleted > 0:
+            print(f"🧹 Cleaned up {deleted} logs older than 90 days")
+    except Exception as e:
+        print(f"⚠️ Log cleanup error: {e}")
+    
+    log_info("Strix Pro started", source="system", component="startup")
     yield
     # Shutdown
     print("👋 Strix Pro shutting down...")
@@ -1626,14 +1636,35 @@ class LogCreateRequest(BM):
 @app.post("/api/logs")
 async def create_log(request: LogCreateRequest):
     """Receive log from frontend or external source"""
-    entry = add_log(
+    entry = log_store.add(
         level=request.level,
         message=request.message,
         source=request.source,
         component=request.component,
         metadata=request.metadata,
     )
-    return {"status": "ok", "id": entry.id}
+    return {"status": "ok", "id": entry["id"]}
+
+@app.post("/api/logs/webhook/loki")
+async def loki_webhook(request: dict):
+    """Loki webhook endpoint — receives pushed logs from Loki
+    
+    Supports Loki push API format:
+    {
+      "streams": [
+        {
+          "labels": {"job": "strix-backend", "level": "info"},
+          "values": [["<timestamp_ns>", "<log_line>"]]
+        }
+      ]
+    }
+    """
+    try:
+        entries = log_store.parse_loki_push(request)
+        return {"status": "ok", "received": len(entries)}
+    except Exception as e:
+        log_error(f"Loki webhook parse error: {str(e)}", source="system", component="loki-webhook")
+        raise HTTPException(status_code=400, detail=f"Invalid Loki payload: {str(e)}")
 
 @app.get("/api/logs")
 async def get_logs(
@@ -1643,11 +1674,12 @@ async def get_logs(
     since: Optional[str] = None,
     limit: int = Query(default=100, le=500),
     offset: int = 0,
+    history: bool = False,
     user: User = Depends(require_any_role),
 ):
-    """Query logs with filters"""
+    """Query logs with filters. Set history=true to query from persistent DB (3-month retention)."""
     return {
-        "logs": log_store.query(level=level, source=source, search=search, since=since, limit=limit, offset=offset),
+        "logs": log_store.query(level=level, source=source, search=search, since=since, limit=limit, offset=offset, use_db=history),
         "stats": log_store.get_stats(),
     }
 
@@ -1662,6 +1694,12 @@ async def clear_logs(user: User = Depends(require_admin)):
     log_store.clear()
     log_info("Logs cleared by admin", source="system", component="log-monitor")
     return {"message": "Logs cleared"}
+
+@app.post("/api/logs/cleanup")
+async def cleanup_logs(days: int = 90, user: User = Depends(require_admin)):
+    """Manually trigger log retention cleanup (admin only)"""
+    deleted = log_store.cleanup_old_logs(days=days)
+    return {"message": f"Cleaned up {deleted} logs older than {days} days", "deleted": deleted}
 
 @app.websocket("/ws/logs")
 async def log_websocket(websocket: WebSocket):
