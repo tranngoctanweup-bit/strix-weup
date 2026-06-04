@@ -1,5 +1,4 @@
 # Loki Configuration for Strix Pro
-# Receives logs from Promtail and forwards to Strix webhook
 
 auth_enabled: false
 
@@ -33,31 +32,16 @@ storage_config:
 
 limits_config:
   reject_old_samples: true
-  reject_old_samples_max_age: 168h  # 7 days max
+  reject_old_samples_max_age: 168h
   ingestion_rate_mb: 10
   ingestion_burst_size_mb: 20
 
-chunk_store_config:
-  max_look_back_period: 2160h  # 90 days retention
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: filesystem
 
-table_manager:
-  retention_deletes_enabled: true
-  retention_period: 2160h  # 90 days
-
-# Ruler: forward logs to Strix webhook
-ruler:
-  storage:
-    type: local
-    local:
-      directory: /loki/rules
-  rule_path: /loki/rules-temp
-  alertmanager_url: http://localhost:9093
-  ring:
-    kvstore:
-      store: inmemory
-  enable_api: true
-  enable_alertmanager_v2: true
-
-# Push target: forward to Strix webhook
 analytics:
   reporting_enabled: false
