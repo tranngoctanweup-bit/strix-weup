@@ -89,7 +89,7 @@ class ToolEngine:
                 "description": "Vulnerability scanner using templates",
                 "category": ToolCategory.WEB,
                 "command": "nuclei",
-                "args_template": "-u {target} -t {templates}",
+                "args_template": "-u {target} -silent -severity low,medium,high,critical",
                 "dangerous": False
             },
             "httpx": {
@@ -441,10 +441,14 @@ class ToolEngine:
             if stderr:
                 output += f"\n[STDERR]\n{stderr}"
             
+            # Security tools often return non-zero when they find vulnerabilities
+            # Consider it success if there's any output
+            has_output = len(stdout.strip()) > 0
+            
             return ToolResult(
-                success=result.returncode == 0,
+                success=result.returncode == 0 or has_output,
                 output=output.strip(),
-                error=stderr if result.returncode != 0 else None,
+                error=stderr if result.returncode != 0 and not has_output else None,
                 tool=tool_name,
                 command=command,
                 duration=duration
