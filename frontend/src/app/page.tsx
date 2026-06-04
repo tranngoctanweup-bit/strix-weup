@@ -303,6 +303,7 @@ export default function Dashboard() {
   const [targets, setTargets] = useState<Target[]>([]);
   const [scans, setScans] = useState<Scan[]>([]);
   const [vulns, setVulns] = useState<Vulnerability[]>([]);
+  const [issues, setIssues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -342,17 +343,19 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [statsRes, targetsRes, scansRes, vulnsRes] = await Promise.all([
+      const [statsRes, targetsRes, scansRes, vulnsRes, issuesRes] = await Promise.all([
         authFetch(`${API_URL}/api/dashboard/stats`),
         authFetch(`${API_URL}/api/targets`),
         authFetch(`${API_URL}/api/scans?limit=50`),
         authFetch(`${API_URL}/api/vulnerabilities?limit=50`),
+        authFetch(`${API_URL}/api/issues?limit=100`),
       ]);
 
       if (statsRes.ok) setStats(await statsRes.json());
       if (targetsRes.ok) setTargets(await targetsRes.json());
       if (scansRes.ok) setScans(await scansRes.json());
       if (vulnsRes.ok) setVulns(await vulnsRes.json());
+      if (issuesRes.ok) setIssues(await issuesRes.json());
 
       // Handle 403 responses
       for (const res of [statsRes, targetsRes, scansRes, vulnsRes]) {
@@ -432,8 +435,25 @@ export default function Dashboard() {
     }
   };
 
-  // Filter vulns
-  const filteredVulns = vulns.filter((v) => {
+  // Filter vulns - merge vulnerabilities + issues from API
+  const allIssues = [
+    ...vulns.map(v => ({ ...v, source: 'scan' })),
+    ...issues.map(i => ({
+      id: `issue-${i.id}`,
+      title: i.title,
+      severity: i.severity,
+      cve_id: i.cve_id || null,
+      affected_component: i.affected_url || 'Unknown',
+      is_fixed: i.status === 'resolved',
+      description: i.description,
+      remediation: i.remediation,
+      source: 'issue',
+      status: i.status,
+      assigned_to: i.assigned_to,
+    }))
+  ];
+  
+  const filteredVulns = allIssues.filter((v) => {
     if (issueFilter === "open" && v.is_fixed) return false;
     if (issueFilter === "fixed" && !v.is_fixed) return false;
     if (searchQuery) {
@@ -450,15 +470,15 @@ export default function Dashboard() {
 
   // Severity counts
   const severityCounts = {
-    critical: vulns.filter((v) => v.severity === "critical").length,
-    high: vulns.filter((v) => v.severity === "high").length,
-    medium: vulns.filter((v) => v.severity === "medium").length,
-    low: vulns.filter((v) => v.severity === "low").length,
-    info: vulns.filter((v) => v.severity === "info").length,
+    critical: allIssues.filter((v) => v.severity === "critical").length,
+    high: allIssues.filter((v) => v.severity === "high").length,
+    medium: allIssues.filter((v) => v.severity === "medium").length,
+    low: allIssues.filter((v) => v.severity === "low").length,
+    info: allIssues.filter((v) => v.severity === "info").length,
   };
 
-  const openVulns = vulns.filter((v) => !v.is_fixed).length;
-  const fixedVulns = vulns.filter((v) => v.is_fixed).length;
+  const openVulns = allIssues.filter((v) => !v.is_fixed).length;
+  const fixedVulns = allIssues.filter((v) => v.is_fixed).length;
 
   // Security score calculation (0-100)
   const securityScore = (() => {
@@ -1571,32 +1591,45 @@ export default function Dashboard() {
 
                 {detailTab === "remediation" && (
                   <div className="space-y-4">
-                    <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
-                      <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-2 flex items-center gap-2">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                        Recommended Actions
-                      </h4>
-                      <ul className="space-y-2 text-[12px] text-[#a1a1aa] leading-relaxed">
-                        <li className="flex items-start gap-2">
-                          <span className="text-indigo-400 mt-0.5">1.</span>
-                          <span>Update {selectedVuln.affected_component || "the affected component"} to the latest stable version.</span>
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-indigo-400 mt-0.5">2.</span>
-                          <span>Review and apply the latest security patches from the vendor.</span>
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-indigo-400 mt-0.5">3.</span>
-                          <span>Verify the fix by re-running a vulnerability scan on this target.</span>
-                        </li>
-                        {selectedVuln.severity === "critical" && (
+                    {/* Show actual remediation from issue if available */}
+                    {selectedVuln.remediation ? (
+                      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                        <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-2 flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                          Remediation
+                        </h4>
+                        <div className="text-[12px] text-[#a1a1aa] leading-relaxed whitespace-pre-wrap">
+                          {selectedVuln.remediation}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                        <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-2 flex items-center gap-2">
+                          <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                          Recommended Actions
+                        </h4>
+                        <ul className="space-y-2 text-[12px] text-[#a1a1aa] leading-relaxed">
                           <li className="flex items-start gap-2">
-                            <span className="text-red-400 mt-0.5">!</span>
-                            <span className="text-red-400">Critical severity — consider isolating the affected system until patched.</span>
+                            <span className="text-indigo-400 mt-0.5">1.</span>
+                            <span>Update {selectedVuln.affected_component || "the affected component"} to the latest stable version.</span>
                           </li>
-                        )}
-                      </ul>
-                    </div>
+                          <li className="flex items-start gap-2">
+                            <span className="text-indigo-400 mt-0.5">2.</span>
+                            <span>Review and apply the latest security patches from the vendor.</span>
+                          </li>
+                          <li className="flex items-start gap-2">
+                            <span className="text-indigo-400 mt-0.5">3.</span>
+                            <span>Verify the fix by re-running a vulnerability scan on this target.</span>
+                          </li>
+                          {selectedVuln.severity === "critical" && (
+                            <li className="flex items-start gap-2">
+                              <span className="text-red-400 mt-0.5">!</span>
+                              <span className="text-red-400">Critical severity — consider isolating the affected system until patched.</span>
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
 
                     {selectedVuln.cve_id && (
                       <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
@@ -2082,6 +2115,26 @@ function NewPentestModal({
 }
 
 function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void }) {
+  const [creatingIssues, setCreatingIssues] = useState(false);
+  const [issuesCreated, setIssuesCreated] = useState<number | null>(null);
+
+  const handleCreateIssues = async () => {
+    setCreatingIssues(true);
+    try {
+      const res = await fetch(`${API_URL}/api/scans/${scan.id}/extract-issues`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIssuesCreated(data.created);
+      }
+    } catch (error) {
+      console.error('Failed to create issues:', error);
+    } finally {
+      setCreatingIssues(false);
+    }
+  };
   // Simple markdown renderer
   function renderMarkdown(text: string) {
     if (!text) return null;
@@ -2200,10 +2253,38 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
           {scan.ai_summary && (
             <div>
               <p className="text-[11px] text-[#71717a] uppercase tracking-wider mb-2 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-indigo-400" /> AI Summary
+                <Sparkles className="w-3 h-3 text-indigo-400" /> AI Analysis & Remediation
               </p>
               <div className="bg-indigo-500/5 rounded-lg p-4 border border-indigo-500/10 space-y-1">
                 {renderMarkdown(scan.ai_summary)}
+              </div>
+              
+              {/* Create Issues Button */}
+              <div className="mt-3 flex items-center gap-3">
+                {issuesCreated !== null ? (
+                  <div className="flex items-center gap-2 text-[13px]">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <span className="text-emerald-400">{issuesCreated} issues created and tracked</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleCreateIssues}
+                    disabled={creatingIssues}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-lg text-[13px] text-indigo-400 transition-colors disabled:opacity-50"
+                  >
+                    {creatingIssues ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Creating Issues...
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-4 h-4" />
+                        Create Issues from Findings
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}

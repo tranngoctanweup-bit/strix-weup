@@ -29,7 +29,7 @@ from src.core.tool_engine import ToolEngine, extract_domain, ensure_url
 from src.db.models import (
     init_db, get_db, Target, Scan, Vulnerability, ScanSchedule,
     ChatHistory, Report, User, ScanStatus, SeverityLevel,
-    Repository, NetworkRange, Integration, SourceCodeScan, Log,
+    Repository, NetworkRange, Integration, SourceCodeScan, Log, Issue,
     create_target, create_scan, update_scan_status, create_vulnerability
 )
 
@@ -531,7 +531,7 @@ def parse_scan_findings(db, scan_id: int, target_id: int, output: str, target: s
 
 
 async def get_ai_summary(output: str, scan_type: str, target: str) -> str:
-    """Get AI summary of scan results"""
+    """Get AI summary of scan results with remediation"""
     try:
         providers = ai_router.get_available_providers()
         if not providers:
@@ -544,15 +544,25 @@ async def get_ai_summary(output: str, scan_type: str, target: str) -> str:
         messages = [
             AIMessage(
                 role="system",
-                content="You are a security analyst. Summarize the scan results concisely, highlighting key findings and potential risks."
+                content="""You are a senior security analyst. Analyze scan results and provide:
+
+1. **Summary**: Brief overview of findings
+2. **Key Findings**: List each vulnerability with:
+   - Severity (Critical/High/Medium/Low/Info)
+   - Description
+   - **Remediation**: Specific fix with code example if applicable
+3. **Recommended Actions**: Prioritized list of steps to fix issues
+4. **Prevention**: How to prevent similar issues in the future
+
+Format as markdown with clear headings. Be specific with fixes - include actual commands, config changes, or code snippets."""
             ),
             AIMessage(
                 role="user",
-                content=f"Summarize this {scan_type} scan result for target {target}:\n\n{output[:3000]}"
+                content=f"Analyze this {scan_type} scan result for target {target}:\n\n{output[:4000]}"
             )
         ]
         
-        response = ai_router.chat(provider, model, messages, max_tokens=500)
+        response = ai_router.chat(provider, model, messages, max_tokens=1500)
         return response.content
     except Exception as e:
         return f"AI summary failed: {e}"
@@ -1769,6 +1779,302 @@ async def delete_source_scan(
     db.delete(scan)
     db.commit()
     return {"message": "Source scan deleted"}
+
+# ─── Issues API ──────────────────────────────────────────────────────────────
+
+class IssueCreateRequest(BaseModel):
+    scan_id: Optional[int] = None
+    target_id: Optional[int] = None
+    title: str
+    severity: str = "medium"
+    description: Optional[str] = None
+    remediation: Optional[str] = None
+    cve_id: Optional[str] = None
+    cvss_score: Optional[str] = None
+    affected_url: Optional[str] = None
+    evidence: Optional[str] = None
+
+class IssueResponse(BaseModel):
+    id: int
+    scan_id: Optional[int]
+    target_id: Optional[int]
+    title: str
+    severity: str
+    description: Optional[str]
+    remediation: Optional[str]
+    status: str
+    cve_id: Optional[str]
+    cvss_score: Optional[str]
+    affected_url: Optional[str]
+    assigned_to: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+@app.post("/api/issues", response_model=IssueResponse)
+async def create_issue(request: IssueCreateRequest, user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Create a new security issue"""
+    issue = Issue(
+        scan_id=request.scan_id,
+        target_id=request.target_id,
+        title=request.title,
+        severity=request.severity,
+        description=request.description,
+        remediation=request.remediation,
+        cve_id=request.cve_id,
+        cvss_score=request.cvss_score,
+        affected_url=request.affected_url,
+        evidence=request.evidence,
+    )
+    db.add(issue)
+    db.commit()
+    db.refresh(issue)
+    return issue
+
+@app.post("/api/issues/bulk")
+async def create_issues_bulk(requests: List[IssueCreateRequest], user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Create multiple issues at once (from scan findings)"""
+    created = []
+    for req in requests:
+        issue = Issue(
+            scan_id=req.scan_id,
+            target_id=req.target_id,
+            title=req.title,
+            severity=req.severity,
+            description=req.description,
+            remediation=req.remediation,
+            cve_id=req.cve_id,
+            cvss_score=req.cvss_score,
+            affected_url=req.affected_url,
+            evidence=req.evidence,
+        )
+        db.add(issue)
+        created.append(issue)
+    db.commit()
+    for issue in created:
+        db.refresh(issue)
+    return {"created": len(created), "issues": [IssueResponse.from_orm(i) for i in created]}
+
+@app.get("/api/issues", response_model=List[IssueResponse])
+async def list_issues(
+    target_id: Optional[int] = None,
+    scan_id: Optional[int] = None,
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100,
+    user: User = Depends(require_any_role),
+    db=Depends(get_db),
+):
+    """List all issues with optional filters"""
+    query = db.query(Issue)
+    if target_id:
+        query = query.filter(Issue.target_id == target_id)
+    if scan_id:
+        query = query.filter(Issue.scan_id == scan_id)
+    if status:
+        query = query.filter(Issue.status == status)
+    if severity:
+        query = query.filter(Issue.severity == severity)
+    return query.order_by(Issue.created_at.desc()).limit(limit).all()
+
+@app.get("/api/issues/stats")
+async def get_issue_stats(user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Get issue statistics"""
+    total = db.query(Issue).count()
+    open_count = db.query(Issue).filter(Issue.status == "open").count()
+    in_progress = db.query(Issue).filter(Issue.status == "in_progress").count()
+    resolved = db.query(Issue).filter(Issue.status == "resolved").count()
+    
+    by_severity = {}
+    for sev in ["critical", "high", "medium", "low", "info"]:
+        by_severity[sev] = db.query(Issue).filter(Issue.severity == sev, Issue.status != "resolved").count()
+    
+    return {
+        "total": total,
+        "open": open_count,
+        "in_progress": in_progress,
+        "resolved": resolved,
+        "by_severity": by_severity
+    }
+
+@app.get("/api/issues/{issue_id}", response_model=IssueResponse)
+async def get_issue(issue_id: int, user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Get issue by ID"""
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    return issue
+
+@app.put("/api/issues/{issue_id}")
+async def update_issue(issue_id: int, status: Optional[str] = None, assigned_to: Optional[str] = None, user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Update issue status or assignment"""
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if status:
+        issue.status = status
+        if status == "resolved":
+            issue.resolved_at = datetime.utcnow()
+    if assigned_to is not None:
+        issue.assigned_to = assigned_to
+    db.commit()
+    return {"message": "Issue updated"}
+
+@app.delete("/api/issues/{issue_id}")
+async def delete_issue(issue_id: int, user: User = Depends(require_admin), db=Depends(get_db)):
+    """Delete an issue (admin only)"""
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+    if not issue:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    db.delete(issue)
+    db.commit()
+    return {"message": "Issue deleted"}
+
+@app.post("/api/scans/{scan_id}/extract-issues")
+async def extract_issues_from_scan(scan_id: int, user: User = Depends(require_any_role), db=Depends(get_db)):
+    """Extract issues from scan vulnerabilities and AI summary"""
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    
+    issues_created = []
+    
+    # 1. Convert existing Vulnerability records for this scan into Issues
+    vulns = db.query(Vulnerability).filter(Vulnerability.scan_id == scan_id).all()
+    for vuln in vulns:
+        existing = db.query(Issue).filter(
+            Issue.scan_id == scan_id,
+            Issue.title == vuln.title
+        ).first()
+        if existing:
+            continue
+        
+        issue = Issue(
+            scan_id=scan_id,
+            target_id=scan.target_id,
+            title=vuln.title,
+            severity=vuln.severity or "medium",
+            description=vuln.description or "",
+            remediation=vuln.remediation if hasattr(vuln, 'remediation') else None,
+            affected_url=vuln.affected_component or "",
+            cve_id=vuln.cve_id,
+            evidence=vuln.description or "",
+        )
+        db.add(issue)
+        issues_created.append(issue)
+    
+    # 2. Extract from AI summary text
+    if scan.ai_summary and "No AI provider" not in scan.ai_summary:
+        summary = scan.ai_summary
+        import re
+        
+        # Extract findings with severity patterns from AI summary
+        finding_patterns = [
+            (r'(?i)(?:SQL Injection|XSS|Cross-Site Scripting|SSRF|CSRF|RCE|Remote Code Execution|Open Port|Clickjacking)[^\n]*', 'high'),
+            (r'(?i)\*\*(?:Critical|High|Medium|Low)\*\*[:\s]+([^\n]+)', None),  # severity in bold
+            (r'(?i)critical[:\s\-]+([^\n]+)', 'critical'),
+            (r'(?i)high[‑\s]+(?:risk|severity)?[:\s\-]+([^\n]+)', 'high'),
+            (r'(?i)medium[‑\s]+(?:risk|severity)?[:\s\-]+([^\n]+)', 'medium'),
+        ]
+        
+        for pattern, default_severity in finding_patterns:
+            matches = re.findall(pattern, summary)
+            for match in matches[:5]:
+                title = match.strip()[:200]
+                if not title or len(title) < 10:
+                    continue
+                
+                # Try to detect severity from the text itself
+                severity = default_severity or "medium"
+                if "critical" in title.lower():
+                    severity = "critical"
+                elif "high" in title.lower():
+                    severity = "high"
+                elif "medium" in title.lower():
+                    severity = "medium"
+                elif "low" in title.lower():
+                    severity = "low"
+                
+                existing = db.query(Issue).filter(Issue.scan_id == scan_id, Issue.title.contains(title[:50])).first()
+                if existing:
+                    continue
+                issue = Issue(
+                    scan_id=scan_id,
+                    target_id=scan.target_id,
+                    title=title,
+                    severity=severity,
+                    description=f"Extracted from AI analysis of scan #{scan_id}",
+                    affected_url="",
+                )
+                db.add(issue)
+                issues_created.append(issue)
+    
+    # 3. If still no issues, parse raw output for basic findings
+    if not issues_created and scan.output:
+        import re
+        # Subdomains
+        subdomains = []
+        in_sub = False
+        for line in scan.output.split('\n'):
+            if 'SUBFINDER' in line or 'SUBDOMAIN' in line:
+                in_sub = True
+                continue
+            if in_sub and line.strip() and '.' in line and not line.startswith('═') and not line.startswith('['):
+                subdomains.append(line.strip())
+            elif line.startswith('═') and in_sub:
+                in_sub = False
+        
+        if subdomains:
+            issue = Issue(
+                scan_id=scan_id,
+                target_id=scan.target_id,
+                title=f"Subdomain Enumeration: {len(subdomains)} subdomains discovered",
+                severity="info",
+                description="Discovered subdomains:\n" + "\n".join(subdomains[:20]),
+            )
+            db.add(issue)
+            issues_created.append(issue)
+        
+        # Open ports from nmap
+        for match in re.finditer(r'(\d+)/tcp\s+open\s+(\S+)\s*(.*)', scan.output):
+            port, service, version = match.groups()
+            issue = Issue(
+                scan_id=scan_id,
+                target_id=scan.target_id,
+                title=f"Open Port: {port}/tcp ({service})",
+                severity="info",
+                description=f"Port {port}/tcp is open running {service} {version}".strip(),
+                affected_url=f":{port}",
+            )
+            db.add(issue)
+            issues_created.append(issue)
+        
+        # Nuclei findings
+        for match in re.finditer(r'\[(\w+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]*)\]', scan.output):
+            sev_raw, tpl, proto, name, url = match.groups()
+            sev_map = {"critical": "critical", "high": "high", "medium": "medium", "low": "low", "info": "info"}
+            issue = Issue(
+                scan_id=scan_id,
+                target_id=scan.target_id,
+                title=f"[Nuclei] {name}",
+                severity=sev_map.get(sev_raw.lower(), "info"),
+                description=f"Template: {tpl}\nProtocol: {proto}\nURL: {url}",
+                affected_url=url,
+                cve_id=tpl if "cve-" in tpl.lower() else None,
+            )
+            db.add(issue)
+            issues_created.append(issue)
+    
+    db.commit()
+    for issue in issues_created:
+        db.refresh(issue)
+    
+    return {
+        "created": len(issues_created),
+        "issues": [IssueResponse.from_orm(i) for i in issues_created]
+    }
 
 # ─── Log Monitor API ────────────────────────────────────────────────────────
 from pydantic import BaseModel as BM

@@ -125,6 +125,31 @@ class ScanSchedule(Base):
     config = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Issue(Base):
+    """Security issue tracked from scan findings"""
+    __tablename__ = "issues"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    scan_id = Column(Integer, ForeignKey("scans.id"))
+    target_id = Column(Integer, ForeignKey("targets.id"))
+    title = Column(String(500), nullable=False)
+    severity = Column(String(20), nullable=False)  # critical, high, medium, low, info
+    description = Column(Text)
+    remediation = Column(Text)  # How to fix
+    status = Column(String(20), default="open")  # open, in_progress, resolved, false_positive
+    cve_id = Column(String(50))  # CVE-2024-XXXX if applicable
+    cvss_score = Column(String(10))
+    affected_url = Column(String(1000))
+    evidence = Column(Text)  # Raw evidence from scan
+    assigned_to = Column(String(255))
+    resolved_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    scan = relationship("Scan", backref="issues")
+    target = relationship("Target", backref="issues")
+
 class ChatHistory(Base):
     """AI chat history"""
     __tablename__ = "chat_history"
