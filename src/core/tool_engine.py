@@ -7,9 +7,41 @@ import subprocess
 import shlex
 import os
 import json
+import re
+from urllib.parse import urlparse
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
+
+
+def extract_domain(target: str) -> str:
+    """Extract bare domain/IP from a URL or domain string.
+    Examples:
+        https://weupbook.vn → weupbook.vn
+        http://example.com:8080/path → example.com
+        192.168.1.1 → 192.168.1.1
+        example.com → example.com
+    """
+    target = target.strip()
+    if '://' in target:
+        parsed = urlparse(target)
+        return parsed.hostname or target
+    # Strip port if present: domain.com:443 → domain.com
+    if ':' in target and not target.replace(':', '').replace('.', '').isdigit():
+        return target.split(':')[0]
+    return target
+
+
+def ensure_url(target: str) -> str:
+    """Ensure target has a protocol prefix (for tools that need URLs).
+    Examples:
+        weupbook.vn → https://weupbook.vn
+        http://example.com → http://example.com
+    """
+    target = target.strip()
+    if not target.startswith(('http://', 'https://')):
+        return f"https://{target}"
+    return target
 
 class ToolCategory(Enum):
     NETWORK = "network"
@@ -98,7 +130,8 @@ class ToolEngine:
                 "description": "HTTP toolkit and probing",
                 "category": ToolCategory.WEB,
                 "command": "httpx",
-                "args_template": "-u {target} -status-code -title -tech-detect",
+                "args_template": "-status-code -title -tech-detect -silent",
+                "stdin": True,
                 "dangerous": False
             },
             
@@ -415,8 +448,16 @@ class ToolEngine:
                 tool=tool_name
             )
         
+        # Handle stdin-based tools (e.g., httpx reads URLs from stdin)
+        stdin_data = None
+        if tool.get("stdin"):
+            stdin_data = args.get("target", "") or args.get("domain", "") or args.get("url", "")
+            # For httpx, ensure we pass a clean URL
+            if tool_name == "httpx" and stdin_data:
+                stdin_data = ensure_url(extract_domain(stdin_data))
+        
         # Execute
-        return self._run_command(command, auto_save, tool_name=tool_name)
+        return self._run_command(command, auto_save, tool_name=tool_name, stdin_data=stdin_data)
     
     def _check_tool_installed(self, command: str) -> bool:
         """Check if a tool is installed"""
@@ -439,13 +480,12 @@ class ToolEngine:
             template = template.replace(f"{{{key}}}", str(value))
         
         # Remove unfilled placeholders
-        import re
         template = re.sub(r'\{[^}]+\}', '', template)
         template = ' '.join(template.split())  # Clean up whitespace
         
         return f"{tool['command']} {template}"
     
-    def _run_command(self, command: str, auto_save: bool = False, tool_name: str = "") -> ToolResult:
+    def _run_command(self, command: str, auto_save: bool = False, tool_name: str = "", stdin_data: str = None) -> ToolResult:
         """Execute a command"""
         import time
         
@@ -479,6 +519,7 @@ class ToolEngine:
             cmd_parts = shlex.split(command)
             result = subprocess.run(
                 cmd_parts,
+                input=stdin_data,
                 capture_output=True,
                 text=True,
                 timeout=300  # 5 minute timeout

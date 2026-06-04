@@ -25,7 +25,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 # Import local modules
 from src.ai.router import AIRouter, AIMessage
-from src.core.tool_engine import ToolEngine
+from src.core.tool_engine import ToolEngine, extract_domain, ensure_url
 from src.db.models import (
     init_db, get_db, Target, Scan, Vulnerability, ScanSchedule,
     ChatHistory, Report, User, ScanStatus, SeverityLevel,
@@ -341,11 +341,13 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
         
         # Full scan runs all tools sequentially
         if scan_type == "full_scan":
+            domain = extract_domain(target)
+            url = ensure_url(domain)
             tools_to_run = [
-                ("nmap", {"target": target, "flags": "-sV -sC -p-"}, "port_scan"),
-                ("subfinder", {"domain": target, "target": target}, "subdomain"),
-                ("httpx", {"target": target, "url": f"http://{target}"}, "web_probe"),
-                ("nuclei", {"target": target, "url": f"http://{target}"}, "vulnerability"),
+                ("nmap", {"target": domain, "flags": "-sV -sC -p-"}, "port_scan"),
+                ("subfinder", {"domain": domain, "target": domain}, "subdomain"),
+                ("httpx", {"target": url}, "web_probe"),
+                ("nuclei", {"target": url}, "vulnerability"),
             ]
             all_outputs = []
             for tool_name, args, label in tools_to_run:
@@ -380,7 +382,23 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
                 }
                 tool_name = tool_map.get(scan_type, "nmap")
             
-            args = {"target": target, "domain": target, "url": f"http://{target}"}
+            domain = extract_domain(target)
+            url = ensure_url(domain)
+            
+            # Build args based on tool needs
+            if tool_name == "nmap":
+                args = {"target": domain, "flags": "-sV -sC -p-"}
+            elif tool_name == "subfinder":
+                args = {"domain": domain, "target": domain}
+            elif tool_name == "httpx":
+                args = {"target": url}
+            elif tool_name in ("nuclei", "nikto"):
+                args = {"target": url}
+            elif tool_name == "whois":
+                args = {"domain": domain}
+            else:
+                args = {"target": domain, "domain": domain, "url": url}
+            
             result = tool_engine.execute(tool_name, args, auto_save)
             
             if result.success:

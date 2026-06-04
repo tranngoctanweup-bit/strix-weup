@@ -333,9 +333,11 @@ export default function Dashboard() {
   // Fetch data
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30000);
+    // Poll faster (every 5s) when scans are running, otherwise every 30s
+    const hasRunning = scans.some((s: any) => s.status === "running");
+    const interval = setInterval(fetchData, hasRunning ? 5000 : 30000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, scans.some((s: any) => s.status === "running")]);
 
   const fetchData = async () => {
     try {
@@ -388,6 +390,25 @@ export default function Dashboard() {
 
   const startScan = async (targetId: number, scanType: string) => {
     try {
+      // Optimistically add a "running" scan to the UI immediately
+      const optimisticScan = {
+        id: Date.now(), // temp ID
+        target_id: targetId,
+        scan_type: scanType,
+        tool: null,
+        status: "running",
+        output: null,
+        ai_summary: null,
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        duration: null,
+        _optimistic: true, // mark as optimistic
+      };
+      setScans((prev: any[]) => [optimisticScan, ...prev]);
+      setShowScanModal(null);
+      addToast(`${scanType} scan started`, "success");
+
+      // Then make the actual API call
       const res = await authFetch(`${API_URL}/api/scans`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -395,15 +416,18 @@ export default function Dashboard() {
       });
       if (res.status === 403) {
         addToast("Insufficient permissions", "error");
+        // Remove optimistic scan on error
+        setScans((prev: any[]) => prev.filter((s: any) => !s._optimistic));
       } else if (res.ok) {
+        // Replace optimistic scan with real data
         fetchData();
-        setShowScanModal(null);
-        addToast(`${scanType} scan started`, "success");
       } else {
         addToast("Failed to start scan", "error");
+        setScans((prev: any[]) => prev.filter((s: any) => !s._optimistic));
       }
     } catch (error) {
       addToast("Failed to start scan", "error");
+      setScans((prev: any[]) => prev.filter((s: any) => !s._optimistic));
     }
   };
 
