@@ -61,6 +61,7 @@ import {
   FolderGit,
   LayoutGrid,
   MessageCircle,
+  RotateCcw,
 } from "lucide-react";
 
 // API base URL
@@ -1008,6 +1009,15 @@ export default function Dashboard() {
                                     className="text-[12px] text-red-400 hover:text-red-300 transition-colors font-medium"
                                   >
                                     Cancel
+                                  </button>
+                                )}
+                                {(scan.status === "completed" || scan.status === "failed") && canScan && (
+                                  <button
+                                    onClick={() => startScan(scan.target_id, scan.scan_type)}
+                                    className="text-[12px] text-emerald-400 hover:text-emerald-300 transition-colors font-medium flex items-center gap-1"
+                                  >
+                                    <RotateCcw className="w-3 h-3" />
+                                    Retest
                                   </button>
                                 )}
                               </div>
