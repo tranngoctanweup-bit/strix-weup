@@ -454,6 +454,7 @@ export default function Dashboard() {
     { id: "issues", icon: AlertTriangle, label: "Issues" },
     ...(canChat ? [{ id: "chat", icon: MessageCircle, label: "Chat" }] : []),
     { id: "_separator", icon: null as any, label: "" },
+    { id: "logs", icon: Terminal, label: "Logs" },
     { id: "repositories", icon: FolderGit, label: "Repositories" },
     { id: "source-code", icon: FileText, label: "Source Code" },
     { id: "domains", icon: Globe, label: "Domains" },
@@ -471,6 +472,7 @@ export default function Dashboard() {
     "pr-reviews": "PR Reviews",
     issues: "Issues",
     chat: "AI Chat",
+    logs: "System Logs",
     tools: "Tools",
     settings: "Settings",
     repositories: "Repositories",
@@ -1197,6 +1199,11 @@ export default function Dashboard() {
             {/* ─── Repositories Tab ────────────────────────────────── */}
             {activeTab === "repositories" && (
               <RepositoriesTab addToast={addToast} authFetch={authFetch} canEdit={canEdit} canScan={canScan} />
+            )}
+
+            {/* ─── Logs Tab ────────────────────────────────────────── */}
+            {activeTab === "logs" && (
+              <LogsTab authFetch={authFetch} addToast={addToast} isAdmin={isAdmin} />
             )}
 
             {/* ─── Source Code Tab ──────────────────────────────────── */}
@@ -2279,6 +2286,220 @@ function ToolsList() {
             <EmptyStateLarge icon={Zap} title="No tools found" message="Security tools will appear here once configured" />
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── System Logs Tab (Grafana-like) ─────────────────────────────────────────
+
+function LogsTab({ authFetch, addToast, isAdmin }: { authFetch: (url: string, options?: RequestInit) => Promise<Response>; addToast: (msg: string, type: Toast["type"]) => void; isAdmin: boolean }) {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>({ total: 0, by_level: {}, by_source: {} });
+  const [filterLevel, setFilterLevel] = useState("all");
+  const [filterSource, setFilterSource] = useState("all");
+  const [search, setSearch] = useState("");
+  const [liveTail, setLiveTail] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
+  const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const pausedLogsRef = useRef<any[]>([]);
+
+  // WebSocket connection for live tail
+  useEffect(() => {
+    if (!liveTail) return;
+
+    const wsUrl = `ws://localhost:8000/ws/logs`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      addToast("Connected to log stream", "success");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "initial") {
+          setLogs(data.logs || []);
+          setStats(data.stats || {});
+        } else if (data.type === "log") {
+          if (isPaused) {
+            pausedLogsRef.current.push(data.entry);
+          } else {
+            setLogs(prev => [data.entry, ...prev].slice(0, 500));
+          }
+          if (data.stats) setStats(data.stats);
+        }
+      } catch { }
+    };
+
+    ws.onclose = () => {
+      // Reconnect after 3s
+      setTimeout(() => {
+        if (liveTail) {
+          // Force re-render to trigger useEffect
+          setLiveTail(false);
+          setTimeout(() => setLiveTail(true), 100);
+        }
+      }, 3000);
+    };
+
+    ws.onerror = () => { };
+
+    return () => {
+      ws.close();
+    };
+  }, [liveTail, isPaused]);
+
+  // Auto-scroll
+  useEffect(() => {
+    if (autoScroll && !isPaused && logContainerRef.current) {
+      logContainerRef.current.scrollTop = 0;
+    }
+  }, [logs, autoScroll, isPaused]);
+
+  // Unpause and flush
+  const handleUnpause = () => {
+    setIsPaused(false);
+    if (pausedLogsRef.current.length > 0) {
+      setLogs(prev => [...pausedLogsRef.current, ...prev].slice(0, 500));
+      pausedLogsRef.current = [];
+    }
+  };
+
+  // Clear logs
+  const handleClear = async () => {
+    try {
+      await authFetch(`${API_URL}/api/logs`, { method: "DELETE" });
+      setLogs([]);
+      addToast("Logs cleared", "success");
+    } catch { addToast("Failed to clear logs", "error"); }
+  };
+
+  // Filter logs client-side
+  const filteredLogs = logs.filter(log => {
+    if (filterLevel !== "all" && log.level !== filterLevel) return false;
+    if (filterSource !== "all" && log.source !== filterSource) return false;
+    if (search && !log.message.toLowerCase().includes(search.toLowerCase()) && !log.component?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  // Level colors (Grafana-like)
+  const levelStyles: Record<string, { bg: string; text: string; dot: string }> = {
+    critical: { bg: "bg-red-500/10", text: "text-red-400", dot: "bg-red-500" },
+    error: { bg: "bg-red-500/5", text: "text-red-400", dot: "bg-red-500" },
+    warning: { bg: "bg-yellow-500/5", text: "text-yellow-400", dot: "bg-yellow-500" },
+    info: { bg: "bg-blue-500/5", text: "text-blue-400", dot: "bg-blue-500" },
+    debug: { bg: "bg-gray-500/5", text: "text-gray-400", dot: "bg-gray-500" },
+  };
+
+  const sourceIcons: Record<string, string> = {
+    backend: "⚡",
+    frontend: "🌐",
+    scanner: "🔍",
+    system: "⚙️",
+  };
+
+  const formatTime = (ts: string) => {
+    const d = new Date(ts);
+    return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" }) + "." + String(d.getMilliseconds()).padStart(3, "0");
+  };
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-8rem)]">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        {/* Level filter */}
+        <div className="flex items-center bg-[#12121a] rounded-md border border-white/[0.06] overflow-hidden">
+          {(["all", "critical", "error", "warning", "info", "debug"] as const).map((l) => (
+            <button key={l} onClick={() => setFilterLevel(l)}
+              className={`px-2.5 py-1.5 text-[11px] font-medium transition-all ${filterLevel === l ? (l === "error" || l === "critical" ? "bg-red-500/10 text-red-400" : l === "warning" ? "bg-yellow-500/10 text-yellow-400" : l === "info" ? "bg-blue-500/10 text-blue-400" : "bg-white/[0.06] text-[#e4e4e7]") : "text-[#71717a] hover:text-[#a1a1aa]"}`}>
+              {l === "all" ? "All" : l.charAt(0).toUpperCase() + l.slice(1)}
+              {l !== "all" && stats.by_level?.[l] > 0 && <span className="ml-1 text-[10px] opacity-70">({stats.by_level[l]})</span>}
+            </button>
+          ))}
+        </div>
+
+        {/* Source filter */}
+        <select value={filterSource} onChange={e => setFilterSource(e.target.value)}
+          className="px-2.5 py-1.5 bg-[#12121a] border border-white/[0.06] rounded-md text-[11px] text-[#e4e4e7] focus:outline-none focus:border-indigo-500/50">
+          <option value="all">All Sources</option>
+          <option value="backend">⚡ Backend</option>
+          <option value="frontend">🌐 Frontend</option>
+          <option value="scanner">🔍 Scanner</option>
+          <option value="system">⚙️ System</option>
+        </select>
+
+        {/* Search */}
+        <div className="flex-1 min-w-[200px] max-w-md flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#12121a] border border-white/[0.06] text-[#71717a] focus-within:border-indigo-500/30 transition-colors">
+          <Search className="w-3.5 h-3.5 shrink-0" />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search logs..."
+            className="flex-1 bg-transparent text-[11px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none" />
+          {search && <button onClick={() => setSearch("")} className="text-[#71717a] hover:text-[#a1a1aa]"><X className="w-3 h-3" /></button>}
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <button onClick={() => { if (isPaused) handleUnpause(); else setIsPaused(true); }}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all ${isPaused ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" : "bg-green-500/10 text-green-400 border border-green-500/20"}`}>
+            {isPaused ? <><Play className="w-3 h-3" /> Resume ({pausedLogsRef.current.length} buffered)</> : <><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Live</>}
+          </button>
+          <label className="flex items-center gap-1.5 text-[11px] text-[#71717a] cursor-pointer">
+            <input type="checkbox" checked={autoScroll} onChange={e => setAutoScroll(e.target.checked)} className="rounded" />
+            Auto-scroll
+          </label>
+          {isAdmin && (
+            <button onClick={handleClear} className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all" title="Clear logs">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Stats bar */}
+      <div className="flex items-center gap-4 mb-2 text-[10px] text-[#71717a]">
+        <span>Total: <span className="text-[#e4e4e7] font-medium">{stats.total || 0}</span></span>
+        <span>Stored: <span className="text-[#e4e4e7] font-medium">{stats.stored || 0}</span></span>
+        <span>Errors: <span className="text-red-400 font-medium">{(stats.by_level?.error || 0) + (stats.by_level?.critical || 0)}</span></span>
+        <span>Warnings: <span className="text-yellow-400 font-medium">{stats.by_level?.warning || 0}</span></span>
+        <span>Showing: <span className="text-indigo-400 font-medium">{filteredLogs.length}</span></span>
+      </div>
+
+      {/* Log Viewer (Grafana-style) */}
+      <div ref={logContainerRef} className="flex-1 overflow-auto bg-[#0a0a0f] rounded-lg border border-white/[0.06] font-mono text-[12px]">
+        {filteredLogs.length > 0 ? (
+          <table className="w-full">
+            <tbody>
+              {filteredLogs.map((log, i) => {
+                const style = levelStyles[log.level] || levelStyles.info;
+                return (
+                  <tr key={log.id || i} className={`${style.bg} hover:bg-white/[0.03] transition-colors border-b border-white/[0.02]`}>
+                    <td className="px-3 py-1.5 text-[10px] text-[#71717a] whitespace-nowrap align-top w-[100px]">{formatTime(log.timestamp)}</td>
+                    <td className="px-2 py-1.5 align-top w-[20px]">
+                      <span className={`w-1.5 h-1.5 rounded-full inline-block mt-1 ${style.dot}`} />
+                    </td>
+                    <td className={`px-2 py-1.5 font-semibold uppercase text-[10px] whitespace-nowrap align-top w-[60px] ${style.text}`}>{log.level}</td>
+                    <td className="px-2 py-1.5 text-[10px] text-[#71717a] whitespace-nowrap align-top w-[80px]">
+                      {sourceIcons[log.source] || "📄"} {log.source}
+                    </td>
+                    <td className="px-2 py-1.5 text-[10px] text-indigo-400/70 whitespace-nowrap align-top w-[80px]">{log.component || "—"}</td>
+                    <td className="px-3 py-1.5 text-[#e4e4e7] break-all">{log.message}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <Terminal className="w-8 h-8 text-[#71717a] mb-3" />
+            <p className="text-[13px] text-[#a1a1aa]">No logs yet</p>
+            <p className="text-[11px] text-[#71717a]">Logs from backend and frontend will appear here in real-time</p>
+          </div>
+        )}
+        <div ref={logEndRef} />
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ FastAPI backend with REST API, WebSocket support, and RBAC
 import os
 import sys
 import json
+import time
 import asyncio
 import subprocess as sp
 from datetime import datetime
@@ -41,6 +42,7 @@ from src.api.report_routes import router as report_router
 from src.services.auth import (
     require_admin, require_developer_or_admin, require_any_role, get_current_user_dep
 )
+from src.services.log_monitor import log_store, add_log, log_info, log_error, log_warning
 
 # Initialize components
 ai_router = AIRouter()
@@ -158,6 +160,53 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """Log all HTTP requests and responses"""
+    start_time = time.time()
+    method = request.method
+    path = request.url.path
+    
+    # Skip health checks and static files
+    skip_paths = ["/health", "/docs", "/openapi.json", "/favicon.ico"]
+    should_log = not any(path.startswith(p) for p in skip_paths)
+    
+    if should_log:
+        log_info(f"{method} {path}", source="backend", component="http", method=method, path=path)
+    
+    try:
+        response = await call_next(request)
+        duration = time.time() - start_time
+        
+        if should_log:
+            level = "error" if response.status_code >= 400 else "info"
+            add_log(
+                level=level,
+                message=f"{method} {path} → {response.status_code} ({duration:.1f}ms)",
+                source="backend",
+                component="http",
+                metadata={
+                    "method": method,
+                    "path": path,
+                    "status": response.status_code,
+                    "duration_ms": round(duration * 1000, 1),
+                }
+            )
+        
+        return response
+    except Exception as e:
+        duration = time.time() - start_time
+        log_error(
+            f"{method} {path} → ERROR: {str(e)} ({duration:.1f}ms)",
+            source="backend",
+            component="http",
+            method=method,
+            path=path,
+            error=str(e),
+        )
+        raise
 
 # WebSocket manager
 async def broadcast(message: dict):
@@ -1563,6 +1612,80 @@ async def delete_source_scan(
     db.delete(scan)
     db.commit()
     return {"message": "Source scan deleted"}
+
+# ─── Log Monitor API ────────────────────────────────────────────────────────
+from pydantic import BaseModel as BM
+
+class LogCreateRequest(BM):
+    level: str = "info"
+    message: str
+    source: str = "frontend"
+    component: str = ""
+    metadata: Optional[Dict] = None
+
+@app.post("/api/logs")
+async def create_log(request: LogCreateRequest):
+    """Receive log from frontend or external source"""
+    entry = add_log(
+        level=request.level,
+        message=request.message,
+        source=request.source,
+        component=request.component,
+        metadata=request.metadata,
+    )
+    return {"status": "ok", "id": entry.id}
+
+@app.get("/api/logs")
+async def get_logs(
+    level: Optional[str] = None,
+    source: Optional[str] = None,
+    search: Optional[str] = None,
+    since: Optional[str] = None,
+    limit: int = Query(default=100, le=500),
+    offset: int = 0,
+    user: User = Depends(require_any_role),
+):
+    """Query logs with filters"""
+    return {
+        "logs": log_store.query(level=level, source=source, search=search, since=since, limit=limit, offset=offset),
+        "stats": log_store.get_stats(),
+    }
+
+@app.get("/api/logs/stats")
+async def get_log_stats(user: User = Depends(require_any_role)):
+    """Get log statistics"""
+    return log_store.get_stats()
+
+@app.delete("/api/logs")
+async def clear_logs(user: User = Depends(require_admin)):
+    """Clear all logs (admin only)"""
+    log_store.clear()
+    log_info("Logs cleared by admin", source="system", component="log-monitor")
+    return {"message": "Logs cleared"}
+
+@app.websocket("/ws/logs")
+async def log_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time log streaming"""
+    await websocket.accept()
+    queue = log_store.subscribe()
+    
+    try:
+        # Send initial logs (last 50)
+        recent = log_store.query(limit=50)
+        await websocket.send_json({"type": "initial", "logs": recent, "stats": log_store.get_stats()})
+        
+        # Stream new logs
+        while True:
+            try:
+                log_entry = await asyncio.wait_for(queue.get(), timeout=30)
+                await websocket.send_json({"type": "log", "entry": log_entry, "stats": log_store.get_stats()})
+            except asyncio.TimeoutError:
+                # Send keepalive
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        log_store.unsubscribe(queue)
 
 # Health check
 @app.get("/health")
