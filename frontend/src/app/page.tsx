@@ -314,7 +314,7 @@ export default function Dashboard() {
   const [scanDetail, setScanDetail] = useState<Scan | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
-  const [issueFilter, setIssueFilter] = useState<"all" | "open" | "fixed">("all");
+  const [issueFilter, setIssueFilter] = useState<"all" | "open" | "in_progress" | "resolved" | "false_positive">("all");
   const [detailTab, setDetailTab] = useState<"details" | "remediation">("details");
   const [dateRange, setDateRange] = useState("30d");
 
@@ -455,8 +455,15 @@ export default function Dashboard() {
   ];
   
   const filteredVulns = allIssues.filter((v) => {
-    if (issueFilter === "open" && v.is_fixed) return false;
-    if (issueFilter === "fixed" && !v.is_fixed) return false;
+    // Status filter
+    if (issueFilter === "open" && v.status !== "open") return false;
+    if (issueFilter === "in_progress" && v.status !== "in_progress") return false;
+    if (issueFilter === "resolved" && v.status !== "resolved") return false;
+    if (issueFilter === "false_positive" && v.status !== "false_positive") return false;
+    // Legacy filter for vulnerabilities without status
+    if (issueFilter === "open" && !v.status && v.is_fixed) return false;
+    if (issueFilter === "resolved" && !v.status && !v.is_fixed) return false;
+    
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       return (
@@ -1189,15 +1196,21 @@ export default function Dashboard() {
                 {/* Filter Tabs + Search */}
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center bg-[#12121a] rounded-md border border-white/[0.06] overflow-hidden">
-                    {(["all", "open", "fixed"] as const).map((f) => (
+                    {([
+                      { key: "all", label: "All" },
+                      { key: "open", label: "Open" },
+                      { key: "in_progress", label: "In Progress" },
+                      { key: "resolved", label: "Resolved" },
+                      { key: "false_positive", label: "False Positive" },
+                    ] as const).map((f) => (
                       <button
-                        key={f}
-                        onClick={() => setIssueFilter(f)}
+                        key={f.key}
+                        onClick={() => setIssueFilter(f.key)}
                         className={`px-3.5 py-1.5 text-[12px] font-medium transition-all duration-150 ${
-                          issueFilter === f ? "bg-indigo-500/10 text-indigo-400" : "text-[#71717a] hover:text-[#a1a1aa]"
+                          issueFilter === f.key ? "bg-indigo-500/10 text-indigo-400" : "text-[#71717a] hover:text-[#a1a1aa]"
                         }`}
                       >
-                        {f.charAt(0).toUpperCase() + f.slice(1)}
+                        {f.label}
                       </button>
                     ))}
                   </div>
@@ -1538,6 +1551,40 @@ export default function Dashboard() {
               <div className="px-5 py-4">
                 {detailTab === "details" && (
                   <div className="space-y-4">
+                    {/* Status Change */}
+                    {selectedVuln.source === "issue" && (
+                      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                        <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-3">Status</h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {[
+                            { key: "open", label: "Open", color: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
+                            { key: "in_progress", label: "In Progress", color: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20" },
+                            { key: "resolved", label: "Resolved", color: "bg-green-500/10 text-green-400 border-green-500/20" },
+                            { key: "false_positive", label: "False Positive", color: "bg-gray-500/10 text-gray-400 border-gray-500/20" },
+                          ].map((s) => (
+                            <button
+                              key={s.key}
+                              onClick={async () => {
+                                const issueId = selectedVuln.id.toString().replace("issue-", "");
+                                await fetch(`${API_URL}/api/issues/${issueId}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ status: s.key }),
+                                });
+                                // Update local state
+                                setIssues((prev) => prev.map((i) => i.id === parseInt(issueId) ? { ...i, status: s.key } : i));
+                                setSelectedVuln({ ...selectedVuln, status: s.key, is_fixed: s.key === "resolved" });
+                              }}
+                              className={`px-3 py-1.5 rounded-md text-[11px] font-medium border transition-all ${
+                                selectedVuln.status === s.key ? s.color : "bg-white/[0.02] text-[#71717a] border-white/[0.06] hover:bg-white/[0.04]"
+                              }`}
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {/* Code block with syntax-like highlighting */}
                     <div className="bg-[#0a0a0f] rounded-lg border border-white/[0.06] overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
