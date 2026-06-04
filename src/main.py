@@ -354,8 +354,13 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
                 log_info(f"Full scan [{scan_id}]: running {label} ({tool_name})", source="scanner", component="full-scan")
                 try:
                     result = await asyncio.to_thread(tool_engine.execute, tool_name, args, auto_save)
-                    if result.output:
-                        all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\n{result.output}")
+                    tool_output = result.output or ""
+                    if result.error:
+                        tool_output += f"\n[STDERR]\n{result.error}" if tool_output else f"[STDERR]\n{result.error}"
+                    if tool_output.strip():
+                        all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\n{tool_output}")
+                    else:
+                        all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\n[No output]")
                 except Exception as e:
                     all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\nERROR: {str(e)}")
             

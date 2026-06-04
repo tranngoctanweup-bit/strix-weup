@@ -2061,6 +2061,81 @@ function NewPentestModal({
 }
 
 function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void }) {
+  // Simple markdown renderer
+  function renderMarkdown(text: string) {
+    if (!text) return null;
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+    let listItems: string[] = [];
+    let listType: 'ol' | 'ul' | null = null;
+
+    const flushList = () => {
+      if (listItems.length > 0 && listType) {
+        const Tag = listType;
+        elements.push(
+          <Tag key={`list-${elements.length}`} className={`ml-4 space-y-1 ${listType === 'ol' ? 'list-decimal' : 'list-disc'} list-inside text-[13px] text-[#a1a1aa]`}>
+            {listItems.map((item, i) => (
+              <li key={i} dangerouslySetInnerHTML={{ __html: inlineFormat(item) }} />
+            ))}
+          </Tag>
+        );
+        listItems = [];
+        listType = null;
+      }
+    };
+
+    const inlineFormat = (s: string) => {
+      return s
+        .replace(/\*\*(.+?)\*\*/g, '<strong class="text-[#e4e4e7] font-semibold">$1</strong>')
+        .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/[0.06] text-indigo-300 text-[12px] font-mono">$1</code>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>');
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        flushList();
+        continue;
+      }
+
+      // Headings
+      if (trimmed.startsWith('### ')) {
+        flushList();
+        elements.push(<h4 key={i} className="text-[13px] font-semibold text-[#e4e4e7] mt-3 mb-1">{trimmed.slice(4)}</h4>);
+      } else if (trimmed.startsWith('## ')) {
+        flushList();
+        elements.push(<h3 key={i} className="text-[14px] font-semibold text-[#e4e4e7] mt-3 mb-1">{trimmed.slice(3)}</h3>);
+      } else if (trimmed.startsWith('# ')) {
+        flushList();
+        elements.push(<h2 key={i} className="text-[15px] font-bold text-[#e4e4e7] mt-3 mb-1">{trimmed.slice(2)}</h2>);
+      }
+      // Ordered list
+      else if (/^\d+\.\s/.test(trimmed)) {
+        if (listType !== 'ol') flushList();
+        listType = 'ol';
+        listItems.push(trimmed.replace(/^\d+\.\s/, ''));
+      }
+      // Unordered list
+      else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+        if (listType !== 'ul') flushList();
+        listType = 'ul';
+        listItems.push(trimmed.slice(2));
+      }
+      // Indented list item (sub-item)
+      else if (/^\s+[-*]\s/.test(line)) {
+        listItems.push('  ' + trimmed.replace(/^[-*]\s/, ''));
+      }
+      // Normal paragraph
+      else {
+        flushList();
+        elements.push(<p key={i} className="text-[13px] text-[#a1a1aa] leading-relaxed" dangerouslySetInnerHTML={{ __html: inlineFormat(trimmed) }} />);
+      }
+    }
+    flushList();
+    return elements;
+  }
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay" onClick={onClose}>
       <div className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-lg mx-4 shadow-2xl animate-slide-up max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
@@ -2106,7 +2181,9 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
               <p className="text-[11px] text-[#71717a] uppercase tracking-wider mb-2 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-indigo-400" /> AI Summary
               </p>
-              <div className="bg-indigo-500/5 rounded-lg p-4 text-[13px] text-[#e4e4e7] leading-relaxed border border-indigo-500/10">{scan.ai_summary}</div>
+              <div className="bg-indigo-500/5 rounded-lg p-4 border border-indigo-500/10 space-y-1">
+                {renderMarkdown(scan.ai_summary)}
+              </div>
             </div>
           )}
         </div>

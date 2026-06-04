@@ -37,6 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
 
+# Remove Python httpx CLI (conflicts with projectdiscovery httpx security tool)
+# The httpx Python library is still available for imports, only the CLI entry point is removed
+RUN rm -f /usr/local/bin/httpx
+
 WORKDIR /app
 
 # Copy application code
