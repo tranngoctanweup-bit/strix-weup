@@ -645,6 +645,170 @@ async def check_installed_tools():
         "total": len(tools)
     }
 
+# ─── Tool Manager API ──────────────────────────────────────────────────────
+# Install scripts for Go-based tools that can't be installed via apt
+TOOL_INSTALL_SCRIPTS = {
+    "nuclei": {
+        "name": "nuclei",
+        "description": "Vulnerability scanner using templates",
+        "repo": "projectdiscovery/nuclei",
+        "binary": "nuclei",
+        "version_cmd": "nuclei -version 2>&1 | head -1",
+    },
+    "subfinder": {
+        "name": "subfinder",
+        "description": "Subdomain enumeration tool",
+        "repo": "projectdiscovery/subfinder",
+        "binary": "subfinder",
+        "version_cmd": "subfinder -version 2>&1 | head -1",
+    },
+    "httpx": {
+        "name": "httpx",
+        "description": "HTTP toolkit and probing",
+        "repo": "projectdiscovery/httpx",
+        "binary": "httpx",
+        "version_cmd": "httpx -version 2>&1 | head -1",
+    },
+    "trivy": {
+        "name": "trivy",
+        "description": "Comprehensive vulnerability scanner",
+        "repo": "aquasecurity/trivy",
+        "binary": "trivy",
+        "version_cmd": "trivy --version 2>&1 | head -1",
+        "install_method": "deb",  # uses .deb package instead of zip
+    },
+    "nikto": {
+        "name": "nikto",
+        "description": "Web server scanner",
+        "repo": "sullo/nikto",
+        "binary": "nikto",
+        "version_cmd": "nikto -Version 2>&1 | head -2",
+        "install_method": "git",
+    },
+}
+
+@app.get("/api/tools/status")
+async def get_tools_status(
+    user: User = Depends(require_any_role),
+):
+    """Get detailed status of all managed tools (version, installed, updatable)"""
+    import subprocess as sp
+    
+    results = []
+    for tool_id, info in TOOL_INSTALL_SCRIPTS.items():
+        binary = info["binary"]
+        installed = False
+        version = "Not installed"
+        
+        # Check if installed
+        try:
+            which = sp.run(["which", binary], capture_output=True, text=True)
+            installed = which.returncode == 0
+        except:
+            pass
+        
+        if installed:
+            try:
+                ver_result = sp.run(info["version_cmd"], shell=True, capture_output=True, text=True, timeout=10)
+                version = ver_result.stdout.strip() or ver_result.stderr.strip() or "Unknown version"
+            except:
+                version = "Unknown version"
+        
+        results.append({
+            "id": tool_id,
+            "name": info["name"],
+            "description": info["description"],
+            "repo": info["repo"],
+            "installed": installed,
+            "version": version,
+            "install_method": info.get("install_method", "zip"),
+        })
+    
+    return results
+
+@app.post("/api/tools/{tool_id}/install")
+async def install_tool(
+    tool_id: str,
+    user: User = Depends(require_admin),
+):
+    """Install or update a security tool"""
+    if tool_id not in TOOL_INSTALL_SCRIPTS:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
+    
+    info = TOOL_INSTALL_SCRIPTS[tool_id]
+    repo = info["repo"]
+    binary = info["binary"]
+    install_method = info.get("install_method", "zip")
+    
+    # Build install command based on method
+    if install_method == "git":
+        # Nikto - clone from git
+        cmd = f"""
+        git clone --depth 1 https://github.com/{repo}.git /opt/nikto 2>/dev/null || true &&
+        ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto &&
+        chmod +x /usr/local/bin/nikto
+        """
+    elif install_method == "deb":
+        # Trivy - install via .deb
+        cmd = """
+        ARCH=$(dpkg --print-architecture) &&
+        if [ "$ARCH" = "arm64" ]; then TRIVY_ARCH="ARM64"; else TRIVY_ARCH="64bit"; fi &&
+        VERSION=$(wget -qO- https://api.github.com/repos/aquasecurity/trivy/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "0.71.0") &&
+        wget -qO /tmp/trivy.deb "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-${TRIVY_ARCH}.deb" &&
+        dpkg -i /tmp/trivy.deb && rm /tmp/trivy.deb
+        """
+    else:
+        # Go-based tools (nuclei, subfinder, httpx) - download zip
+        cmd = f"""
+        ARCH=$(dpkg --print-architecture) &&
+        if [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi &&
+        VERSION=$(wget -qO- https://api.github.com/repos/{repo}/releases/latest 2>/dev/null | grep -oP '"tag_name": "v\\K[^"]*' || echo "latest") &&
+        wget -qO /tmp/{binary}.zip "https://github.com/{repo}/releases/download/v${VERSION}/{binary}_linux_${{GOARCH}}.zip" &&
+        unzip -o /tmp/{binary}.zip -d /tmp && mv /tmp/{binary} /usr/local/bin/{binary} && chmod +x /usr/local/bin/{binary} && rm -f /tmp/{binary}.zip
+        """
+    
+    # Execute install
+    try:
+        result = sp.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+        success = result.returncode == 0
+        
+        # Verify installation
+        verify = sp.run(["which", binary], capture_output=True, text=True)
+        installed = verify.returncode == 0
+        
+        return {
+            "success": installed,
+            "tool": tool_id,
+            "message": f"{info['name']} {'installed' if installed else 'install failed'}",
+            "output": result.stdout[-500:] if result.stdout else "",
+            "error": result.stderr[-500:] if result.stderr and not installed else "",
+        }
+    except sp.TimeoutExpired:
+        return {"success": False, "tool": tool_id, "message": "Install timed out (120s)", "error": "Timeout"}
+    except Exception as e:
+        return {"success": False, "tool": tool_id, "message": str(e), "error": str(e)}
+
+@app.post("/api/tools/install-all")
+async def install_all_tools(
+    user: User = Depends(require_admin),
+):
+    """Install all missing tools"""
+    results = []
+    for tool_id in TOOL_INSTALL_SCRIPTS:
+        try:
+            binary = TOOL_INSTALL_SCRIPTS[tool_id]["binary"]
+            which = sp.run(["which", binary], capture_output=True, text=True)
+            if which.returncode != 0:
+                # Tool not installed, install it
+                result = await install_tool(tool_id, user)
+                results.append(result)
+            else:
+                results.append({"success": True, "tool": tool_id, "message": f"{tool_id} already installed", "skipped": True})
+        except Exception as e:
+            results.append({"success": False, "tool": tool_id, "message": str(e), "error": str(e)})
+    
+    return {"results": results, "total": len(results)}
+
 # WebSocket
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

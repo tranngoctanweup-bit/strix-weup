@@ -3174,6 +3174,9 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
         </div>
       </div>
 
+      {/* Tool Manager (Admin Only) */}
+      {isAdmin && <ToolManager authFetch={authFetch} addToast={addToast} />}
+
       <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
         <div className="px-5 py-4 border-b border-white/[0.06]">
           <h4 className="text-[13px] font-semibold text-[#e4e4e7]">About</h4>
@@ -3196,6 +3199,123 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
 
       {/* User Management (Admin Only) */}
       {isAdmin && <UserManagement authFetch={authFetch} addToast={addToast} />}
+    </div>
+  );
+}
+
+// ─── Tool Manager Component ──────────────────────────────────────────────────
+
+function ToolManager({ authFetch, addToast }: { authFetch: (url: string, options?: RequestInit) => Promise<Response>; addToast: (msg: string, type: Toast["type"]) => void }) {
+  const [tools, setTools] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [installing, setInstalling] = useState<Set<string>>(new Set());
+  const [installingAll, setInstallingAll] = useState(false);
+
+  const fetchTools = async () => {
+    try {
+      const res = await authFetch(`${API_URL}/api/tools/status`);
+      if (res.ok) setTools(await res.json());
+    } catch { } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchTools(); }, []);
+
+  const handleInstall = async (toolId: string) => {
+    setInstalling(prev => new Set(prev).add(toolId));
+    try {
+      const res = await authFetch(`${API_URL}/api/tools/${toolId}/install`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        addToast(`${toolId} installed successfully!`, "success");
+        fetchTools();
+      } else {
+        addToast(`Failed to install ${toolId}: ${data.message}`, "error");
+      }
+    } catch { addToast(`Failed to install ${toolId}`, "error"); }
+    finally { setInstalling(prev => { const s = new Set(prev); s.delete(toolId); return s; }); }
+  };
+
+  const handleInstallAll = async () => {
+    setInstallingAll(true);
+    try {
+      const res = await authFetch(`${API_URL}/api/tools/install-all`, { method: "POST" });
+      const data = await res.json();
+      const installed = data.results?.filter((r: any) => r.success && !r.skipped).length || 0;
+      const skipped = data.results?.filter((r: any) => r.skipped).length || 0;
+      const failed = data.results?.filter((r: any) => !r.success).length || 0;
+      addToast(`Tools: ${installed} installed, ${skipped} already ok, ${failed} failed`, failed > 0 ? "error" : "success");
+      fetchTools();
+    } catch { addToast("Failed to install tools", "error"); }
+    finally { setInstallingAll(false); }
+  };
+
+  if (loading) return null;
+
+  const installedCount = tools.filter(t => t.installed).length;
+  const missingCount = tools.filter(t => !t.installed).length;
+
+  return (
+    <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+        <div>
+          <h4 className="text-[13px] font-semibold text-[#e4e4e7]">🔧 Tool Manager</h4>
+          <p className="text-[11px] text-[#71717a] mt-0.5">{installedCount}/{tools.length} tools installed · Install & update security tools at runtime</p>
+        </div>
+        {missingCount > 0 && (
+          <button
+            onClick={handleInstallAll}
+            disabled={installingAll}
+            className="flex items-center gap-2 px-3.5 py-2 bg-green-500/10 text-green-400 border border-green-500/20 rounded-md text-[12px] font-medium hover:bg-green-500/20 transition-all disabled:opacity-50"
+          >
+            {installingAll ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Installing...</> : <><Wrench className="w-3.5 h-3.5" /> Install All Missing</>}
+          </button>
+        )}
+      </div>
+      <div className="divide-y divide-white/[0.03]">
+        {tools.map((tool) => {
+          const isInstalling = installing.has(tool.id);
+          return (
+            <div key={tool.id} className="flex items-center gap-4 px-5 py-3 hover:bg-white/[0.02] transition-colors">
+              <div className={`w-2 h-2 rounded-full shrink-0 ${tool.installed ? 'bg-green-500' : 'bg-red-500'}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-medium text-[#e4e4e7]">{tool.name}</span>
+                  <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded">{tool.repo}</span>
+                </div>
+                <p className="text-[11px] text-[#71717a] truncate">{tool.description}</p>
+              </div>
+              <div className="text-right shrink-0">
+                {tool.installed ? (
+                  <span className="text-[11px] text-green-400 font-mono">{tool.version.split('\n')[0]}</span>
+                ) : (
+                  <span className="text-[11px] text-red-400">Not installed</span>
+                )}
+              </div>
+              <button
+                onClick={() => handleInstall(tool.id)}
+                disabled={isInstalling}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-medium transition-all shrink-0 ${
+                  tool.installed
+                    ? 'text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20'
+                    : 'text-orange-400 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20'
+                } disabled:opacity-50`}
+              >
+                {isInstalling ? (
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Installing...</>
+                ) : tool.installed ? (
+                  <><RefreshCw className="w-3 h-3" /> Update</>
+                ) : (
+                  <><Wrench className="w-3 h-3" /> Install</>
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="px-5 py-3 border-t border-white/[0.06] bg-white/[0.01]">
+        <p className="text-[10px] text-[#71717a]">
+          💡 Tools are installed at runtime into the Docker container. After container rebuild, use "Install All Missing" to restore all tools. GitHub downloads run from the container network, not Docker build.
+        </p>
+      </div>
     </div>
   );
 }
