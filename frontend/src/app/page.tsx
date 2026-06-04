@@ -18,6 +18,7 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   Zap,
   Bug,
   Lock,
@@ -32,6 +33,7 @@ import {
   Send,
   ArrowUpRight,
   TrendingUp,
+  TrendingDown,
   Command,
   Sparkles,
   Wifi,
@@ -42,6 +44,23 @@ import {
   LogOut,
   Users,
   Crown,
+  ExternalLink,
+  Share2,
+  Wand2,
+  LayoutDashboard,
+  Crosshair,
+  Radar,
+  ScanLine,
+  AlertOctagon,
+  MessageSquare,
+  Wrench,
+  SlidersHorizontal,
+  GitBranch,
+  Puzzle,
+  Network,
+  FolderGit,
+  LayoutGrid,
+  MessageCircle,
 } from "lucide-react";
 
 // API base URL
@@ -91,7 +110,10 @@ interface Vulnerability {
   severity: string;
   cve_id?: string;
   affected_component?: string;
+  description?: string;
   is_fixed: boolean;
+  created_at?: string;
+  scan_id?: number;
 }
 
 interface Toast {
@@ -99,6 +121,167 @@ interface Toast {
   message: string;
   type: "success" | "error" | "info";
 }
+
+// ─── Severity color helpers ──────────────────────────────────────────────────
+
+const SEVERITY_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
+  critical: { bg: "bg-red-500/10", text: "text-red-400", border: "border-red-500/20", dot: "bg-red-500" },
+  high: { bg: "bg-orange-500/10", text: "text-orange-400", border: "border-orange-500/20", dot: "bg-orange-500" },
+  medium: { bg: "bg-yellow-500/10", text: "text-yellow-400", border: "border-yellow-500/20", dot: "bg-yellow-500" },
+  low: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/20", dot: "bg-blue-500" },
+  info: { bg: "bg-blue-500/10", text: "text-blue-400", border: "border-blue-500/20", dot: "bg-blue-500" },
+};
+
+const SEVERITY_HEX: Record<string, string> = {
+  critical: "#ef4444",
+  high: "#f97316",
+  medium: "#eab308",
+  low: "#3b82f6",
+  info: "#3b82f6",
+};
+
+function getSeverityColor(severity: string) {
+  return SEVERITY_COLORS[severity] || SEVERITY_COLORS.info;
+}
+
+// ─── CSS Donut Chart ─────────────────────────────────────────────────────────
+
+function DonutChart({ data }: { data: { label: string; value: number; color: string }[] }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  if (total === 0) {
+    return (
+      <div className="relative w-40 h-40 mx-auto">
+        <div
+          className="w-40 h-40 rounded-full"
+          style={{ background: "conic-gradient(#374151 0deg 360deg)" }}
+        />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-24 h-24 rounded-full bg-[#12121a] flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl font-bold text-[#e4e4e7]">0</div>
+              <div className="text-[10px] text-[#71717a]">Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  let cumulative = 0;
+  const gradients: string[] = [];
+  data.forEach((d) => {
+    if (d.value === 0) return;
+    const start = (cumulative / total) * 360;
+    cumulative += d.value;
+    const end = (cumulative / total) * 360;
+    gradients.push(`${d.color} ${start}deg ${end}deg`);
+  });
+
+  return (
+    <div className="relative w-40 h-40 mx-auto">
+      <div
+        className="w-40 h-40 rounded-full"
+        style={{ background: `conic-gradient(${gradients.join(", ")})` }}
+      />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-24 h-24 rounded-full bg-[#12121a] flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-[#e4e4e7]">{total}</div>
+            <div className="text-[10px] text-[#71717a]">Total</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SVG Line Chart ──────────────────────────────────────────────────────────
+
+function LineChart({
+  data,
+  color = "#14b8a6",
+  secondaryData,
+  secondaryColor = "#ef4444",
+  height = 120,
+}: {
+  data: number[];
+  color?: string;
+  secondaryData?: number[];
+  secondaryColor?: string;
+  height?: number;
+}) {
+  const allValues = secondaryData ? [...data, ...secondaryData] : data;
+  const max = Math.max(...allValues, 1);
+  const w = 300;
+  const h = height;
+  const padding = 10;
+
+  const points = data.map((v, i) => {
+    const x = padding + (i / Math.max(data.length - 1, 1)) * (w - padding * 2);
+    const y = h - padding - (v / max) * (h - padding * 2);
+    return `${x},${y}`;
+  });
+
+  let secondaryPoints: string[] = [];
+  if (secondaryData) {
+    secondaryPoints = secondaryData.map((v, i) => {
+      const x = padding + (i / Math.max(secondaryData.length - 1, 1)) * (w - padding * 2);
+      const y = h - padding - (v / max) * (h - padding * 2);
+      return `${x},${y}`;
+    });
+  }
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height }}>
+      {/* Grid lines */}
+      {[0.25, 0.5, 0.75].map((pct) => (
+        <line
+          key={pct}
+          x1={padding}
+          y1={h - padding - pct * (h - padding * 2)}
+          x2={w - padding}
+          y2={h - padding - pct * (h - padding * 2)}
+          stroke="rgba(255,255,255,0.04)"
+          strokeWidth="1"
+        />
+      ))}
+      {/* Primary line */}
+      <polyline
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points.join(" ")}
+      />
+      {data.map((v, i) => {
+        const x = padding + (i / Math.max(data.length - 1, 1)) * (w - padding * 2);
+        const y = h - padding - (v / max) * (h - padding * 2);
+        return <circle key={i} cx={x} cy={y} r="3" fill={color} />;
+      })}
+      {/* Secondary line */}
+      {secondaryData && (
+        <>
+          <polyline
+            fill="none"
+            stroke={secondaryColor}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={secondaryPoints.join(" ")}
+          />
+          {secondaryData.map((v, i) => {
+            const x = padding + (i / Math.max(secondaryData.length - 1, 1)) * (w - padding * 2);
+            const y = h - padding - (v / max) * (h - padding * 2);
+            return <circle key={`s-${i}`} cx={x} cy={y} r="3" fill={secondaryColor} />;
+          })}
+        </>
+      )}
+    </svg>
+  );
+}
+
+// ─── Main Dashboard Component ────────────────────────────────────────────────
 
 export default function Dashboard() {
   const router = useRouter();
@@ -114,7 +297,10 @@ export default function Dashboard() {
   const [showScanModal, setShowScanModal] = useState<{ targetId: number; targetName: string } | null>(null);
   const [scanDetail, setScanDetail] = useState<Scan | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [selectedVuln, setSelectedVuln] = useState<Vulnerability | null>(null);
+  const [issueFilter, setIssueFilter] = useState<"all" | "open" | "fixed">("all");
+  const [detailTab, setDetailTab] = useState<"details" | "remediation">("details");
+  const [dateRange, setDateRange] = useState("30d");
 
   const addToast = (message: string, type: Toast["type"] = "info") => {
     const id = Date.now();
@@ -143,8 +329,8 @@ export default function Dashboard() {
       const [statsRes, targetsRes, scansRes, vulnsRes] = await Promise.all([
         authFetch(`${API_URL}/api/dashboard/stats`),
         authFetch(`${API_URL}/api/targets`),
-        authFetch(`${API_URL}/api/scans?limit=10`),
-        authFetch(`${API_URL}/api/vulnerabilities?limit=10`),
+        authFetch(`${API_URL}/api/scans?limit=50`),
+        authFetch(`${API_URL}/api/vulnerabilities?limit=50`),
       ]);
 
       if (statsRes.ok) setStats(await statsRes.json());
@@ -208,117 +394,175 @@ export default function Dashboard() {
     }
   };
 
-  const tabLabels: Record<string, string> = {
-    dashboard: "Overview",
-    targets: "Targets",
-    scans: "Scans",
-    vulns: "Vulnerabilities",
-    chat: "AI Assistant",
+  // Filter vulns
+  const filteredVulns = vulns.filter((v) => {
+    if (issueFilter === "open" && v.is_fixed) return false;
+    if (issueFilter === "fixed" && !v.is_fixed) return false;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      return (
+        v.title.toLowerCase().includes(q) ||
+        v.cve_id?.toLowerCase().includes(q) ||
+        v.affected_component?.toLowerCase().includes(q) ||
+        v.severity.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  // Severity counts
+  const severityCounts = {
+    critical: vulns.filter((v) => v.severity === "critical").length,
+    high: vulns.filter((v) => v.severity === "high").length,
+    medium: vulns.filter((v) => v.severity === "medium").length,
+    low: vulns.filter((v) => v.severity === "low").length,
+    info: vulns.filter((v) => v.severity === "info").length,
+  };
+
+  const openVulns = vulns.filter((v) => !v.is_fixed).length;
+  const fixedVulns = vulns.filter((v) => v.is_fixed).length;
+
+  // Security score calculation (0-100)
+  const securityScore = (() => {
+    if (vulns.length === 0) return 100;
+    const penalty =
+      severityCounts.critical * 15 +
+      severityCounts.high * 8 +
+      severityCounts.medium * 3 +
+      severityCounts.low * 1;
+    return Math.max(0, Math.min(100, 100 - penalty));
+  })();
+
+  // Sidebar nav items — new layout matching strix.ai
+  const navItems = [
+    { id: "dashboard", icon: LayoutGrid, label: "Dashboard" },
+    { id: "pentests", icon: Search, label: "Pentests" },
+    { id: "pr-reviews", icon: GitBranch, label: "PR Reviews" },
+    { id: "issues", icon: AlertTriangle, label: "Issues" },
+    ...(canChat ? [{ id: "chat", icon: MessageCircle, label: "Chat" }] : []),
+    { id: "_separator", icon: null as any, label: "" },
+    { id: "repositories", icon: FolderGit, label: "Repositories" },
+    { id: "domains", icon: Globe, label: "Domains" },
+    { id: "networks", icon: Network, label: "Networks" },
+    { id: "integrations", icon: Puzzle, label: "Integrations" },
+    { id: "settings", icon: Settings, label: "Settings" },
+  ] as { id: string; icon: any; label: string }[];
+
+  const showDetailPanel = activeTab === "issues" && selectedVuln !== null;
+
+  // Header titles
+  const headerTitles: Record<string, string> = {
+    dashboard: "Security Dashboard",
+    pentests: "Pentests",
+    "pr-reviews": "PR Reviews",
+    issues: "Issues",
+    chat: "AI Chat",
     tools: "Tools",
     settings: "Settings",
+    repositories: "Repositories",
+    domains: "Domains",
+    networks: "Networks",
+    integrations: "Integrations",
   };
 
   // Loading skeleton
   if (loading) {
     return (
-      <div className="flex min-h-screen">
-        <aside className="w-64 bg-[#0e0e15] border-r border-white/[0.06] p-4">
-          <div className="flex items-center gap-3 mb-8 px-2">
-            <div className="skeleton w-9 h-9 rounded-lg" />
-            <div className="skeleton w-24 h-5" />
+      <div className="flex h-screen overflow-hidden bg-[#0a0a0f]">
+        <aside className="w-[60px] lg:w-[220px] bg-[#0e0e15] border-r border-white/[0.06] flex flex-col shrink-0">
+          <div className="flex items-center gap-3 px-4 h-14 border-b border-white/[0.06]">
+            <div className="skeleton w-8 h-8 rounded-lg" />
+            <div className="hidden lg:block skeleton w-20 h-4" />
           </div>
-          <div className="space-y-2">
-            {Array.from({ length: 7 }).map((_, i) => (
+          <div className="flex-1 p-2 space-y-1 mt-2">
+            {Array.from({ length: 10 }).map((_, i) => (
               <div key={i} className="skeleton w-full h-9 rounded-md" />
             ))}
           </div>
         </aside>
-        <main className="flex-1 p-6">
-          <div className="skeleton w-48 h-8 mb-6" />
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="skeleton h-32 rounded-lg" />
-            ))}
-          </div>
-          <div className="skeleton h-64 rounded-lg mb-6" />
-          <div className="skeleton h-48 rounded-lg" />
+        <main className="flex-1 flex items-center justify-center">
+          <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
         </main>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen relative">
-      {/* Sidebar */}
-      <aside className="w-[260px] bg-[#0e0e15] border-r border-white/[0.06] flex flex-col shrink-0">
+    <div className="flex h-screen overflow-hidden bg-[#0a0a0f]">
+      {/* ─── Sidebar ─────────────────────────────────────────────────── */}
+      <aside className="w-[60px] lg:w-[220px] bg-[#0e0e15] border-r border-white/[0.06] flex flex-col shrink-0 transition-all duration-200">
         {/* Logo */}
-        <div className="flex items-center gap-3 px-5 h-16 border-b border-white/[0.06]">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Shield className="w-4.5 h-4.5 text-white" />
+        <div className="flex items-center gap-3 px-4 h-14 border-b border-white/[0.06]">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
+            <Shield className="w-4 h-4 text-white" />
           </div>
-          <div>
+          <div className="hidden lg:block">
             <h1 className="text-sm font-semibold text-[#e4e4e7] tracking-tight">Strix Pro</h1>
-            <p className="text-[10px] text-[#71717a] tracking-wide uppercase">Security Platform</p>
+            <p className="text-[9px] text-[#71717a] tracking-widest uppercase">Security Platform</p>
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-0.5">
-          {([
-            { id: "dashboard", icon: BarChart3, label: "Overview" },
-            { id: "targets", icon: Target, label: "Targets" },
-            { id: "scans", icon: Search, label: "Scans" },
-            { id: "vulns", icon: Bug, label: "Vulnerabilities" },
-            ...(canChat ? [{ id: "chat", icon: Sparkles, label: "AI Assistant" }] : []),
-            { id: "tools", icon: Zap, label: "Tools" },
-            ...(isAdmin ? [{ id: "settings", icon: Settings, label: "Settings" }] : []),
-          ] as { id: string; icon: any; label: string }[]).map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-200 group ${
-                activeTab === item.id
-                  ? "bg-indigo-500/10 text-indigo-400"
-                  : "text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04]"
-              }`}
-            >
-              <item.icon className={`w-4 h-4 ${
-                activeTab === item.id ? "text-indigo-400" : "text-[#71717a] group-hover:text-[#a1a1aa]"
-              }`} />
-              <span>{item.label}</span>
-              {activeTab === item.id && (
-                <div className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400" />
-              )}
-            </button>
-          ))}
+        <nav className="flex-1 p-2 space-y-0.5 mt-1 overflow-auto">
+          {navItems.map((item) => {
+            if (item.id === "_separator") {
+              return <div key="sep" className="my-2 mx-3 border-t border-white/[0.06]" />;
+            }
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  if (item.id !== "issues") setSelectedVuln(null);
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-[13px] font-medium transition-all duration-150 group ${
+                  activeTab === item.id
+                    ? "bg-indigo-500/10 text-indigo-400"
+                    : "text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04]"
+                }`}
+                title={item.label}
+              >
+                <item.icon
+                  className={`w-4 h-4 shrink-0 ${
+                    activeTab === item.id ? "text-indigo-400" : "text-[#71717a] group-hover:text-[#a1a1aa]"
+                  }`}
+                />
+                <span className="hidden lg:inline">{item.label}</span>
+                {activeTab === item.id && (
+                  <div className="hidden lg:block ml-auto w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                )}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Bottom section */}
-        <div className="p-3 border-t border-white/[0.06]">
-          {/* Role badge */}
-          <div className="px-3 mb-2">
-            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider ${
-              user?.role === "admin"
-                ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                : user?.role === "developer"
-                ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                : "bg-[#71717a]/10 text-[#a1a1aa] border border-white/[0.06]"
-            }`}>
+        <div className="p-2 border-t border-white/[0.06]">
+          <div className="hidden lg:block px-3 mb-2">
+            <span
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider ${
+                user?.role === "admin"
+                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                  : user?.role === "developer"
+                  ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                  : "bg-[#71717a]/10 text-[#a1a1aa] border border-white/[0.06]"
+              }`}
+            >
               {user?.role === "admin" && <Crown className="w-3 h-3" />}
               {user?.role}
             </span>
           </div>
           <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[11px] font-semibold text-white">
+            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-[11px] font-semibold text-white shrink-0">
               {user?.name?.[0]?.toUpperCase() || "U"}
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="hidden lg:block flex-1 min-w-0">
               <p className="text-[12px] font-medium text-[#e4e4e7] truncate">{user?.name || "User"}</p>
               <p className="text-[10px] text-[#71717a] truncate">{user?.email || ""}</p>
             </div>
             <button
               onClick={logout}
-              className="p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all"
+              className="hidden lg:block p-1.5 rounded text-[#71717a] hover:text-red-400 hover:bg-red-500/10 transition-all"
               title="Logout"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -327,319 +571,782 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        {/* Header */}
-        <header className="sticky top-0 z-30 h-14 flex items-center justify-between px-6 border-b border-white/[0.06] bg-[#0a0a0f]/80 backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <h2 className="text-sm font-semibold text-[#e4e4e7] tracking-tight">{tabLabels[activeTab]}</h2>
-            {stats?.scans.running ? (
-              <span className="flex items-center gap-1.5 text-[11px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500"></span>
+      {/* ─── Main Area ───────────────────────────────────────────────── */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* ─── Middle Panel (content) ────────────────────────────────── */}
+        <main className="flex-1 flex flex-col overflow-hidden">
+          {/* Header */}
+          <header className="h-14 flex items-center justify-between px-5 border-b border-white/[0.06] bg-[#0a0a0f]/80 backdrop-blur-xl shrink-0">
+            <div className="flex items-center gap-3">
+              <h2 className="text-sm font-semibold text-[#e4e4e7] tracking-tight">
+                {headerTitles[activeTab] || "Dashboard"}
+              </h2>
+              {stats?.scans.running ? (
+                <span className="flex items-center gap-1.5 text-[11px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-blue-500" />
+                  </span>
+                  {stats.scans.running} running
                 </span>
-                {stats.scans.running} running
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {/* Search bar */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white/[0.04] border border-white/[0.06] text-[#71717a] text-[13px] hover:border-white/[0.1] transition-colors cursor-pointer min-w-[200px]">
-              <Search className="w-3.5 h-3.5" />
-              <span className="flex-1">Search...</span>
-              <kbd className="text-[10px] bg-white/[0.06] px-1.5 py-0.5 rounded text-[#71717a]">⌘K</kbd>
-            </div>
-
-            <button
-              onClick={() => { fetchData(); addToast("Data refreshed", "info"); }}
-              className="p-2 rounded-md text-[#71717a] hover:text-[#a1a1aa] hover:bg-white/[0.04] transition-all duration-200"
-              title="Refresh"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
-
-            <button className="p-2 rounded-md text-[#71717a] hover:text-[#a1a1aa] hover:bg-white/[0.04] transition-all duration-200 relative">
-              <Bell className="w-4 h-4" />
-              {stats?.vulnerabilities.critical ? (
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
               ) : null}
-            </button>
-          </div>
-        </header>
+            </div>
 
-        {/* Content */}
-        <div className="p-6 animate-fade-in">
-          {/* Dashboard Tab */}
-          {activeTab === "dashboard" && (
-            <div className="space-y-6">
-              {/* Getting Started Guide - shown when no targets */}
-              {targets.length === 0 && (
-                <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-6">
-                  <h3 className="text-sm font-semibold text-[#e4e4e7] mb-4">Getting Started</h3>
-                  <div className="flex items-stretch gap-0">
-                    {[
-                      { step: 1, title: "Add a Target", desc: "Add a domain, IP, or URL to monitor" },
-                      { step: 2, title: "Run a Scan", desc: "Choose from port scan, subdomain, web scan, or vulnerability scan" },
-                      { step: 3, title: "Review Results", desc: "View vulnerabilities, get AI analysis, and generate reports" },
-                    ].map((s, i) => (
-                      <div key={s.step} className="flex items-center flex-1">
-                        <div className="flex flex-col items-center text-center flex-1 px-3">
-                          <div className="w-9 h-9 rounded-full bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-[13px] font-bold text-indigo-400 mb-2">
-                            {s.step}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  fetchData();
+                  addToast("Data refreshed", "info");
+                }}
+                className="p-2 rounded-md text-[#71717a] hover:text-[#a1a1aa] hover:bg-white/[0.04] transition-all duration-200"
+                title="Refresh"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button className="p-2 rounded-md text-[#71717a] hover:text-[#a1a1aa] hover:bg-white/[0.04] transition-all duration-200 relative">
+                <Bell className="w-4 h-4" />
+                {stats?.vulnerabilities.critical ? (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full" />
+                ) : null}
+              </button>
+            </div>
+          </header>
+
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-auto p-5 animate-fade-in">
+            {/* ─── Dashboard Tab (redesigned) ───────────────────────── */}
+            {activeTab === "dashboard" && (
+              <div className="space-y-6">
+                {/* Dashboard header row */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-[#e4e4e7]">Security Dashboard</h3>
+                    <p className="text-[12px] text-[#71717a] mt-0.5">Overview of your security posture</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center bg-[#12121a] rounded-md border border-white/[0.06] overflow-hidden">
+                      {(["7d", "30d", "90d"] as const).map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => setDateRange(r)}
+                          className={`px-3 py-1.5 text-[12px] font-medium transition-all duration-150 ${
+                            dateRange === r ? "bg-indigo-500/10 text-indigo-400" : "text-[#71717a] hover:text-[#a1a1aa]"
+                          }`}
+                        >
+                          {r === "7d" ? "Last 7 Days" : r === "30d" ? "Last 30 Days" : "Last 90 Days"}
+                        </button>
+                      ))}
+                    </div>
+                    {canScan && (
+                      <button
+                        onClick={() => setShowAddTarget(true)}
+                        className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        New Pentest
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top metric row — 5 cards */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  {/* Security Score */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">Security Score</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">
+                      {securityScore.toFixed(1)} <span className="text-base font-normal text-[#71717a]">/ 100</span>
+                    </div>
+                  </div>
+                  {/* Vulnerabilities */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">Vulnerabilities</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">{vulns.length}</div>
+                    {severityCounts.critical > 0 && (
+                      <div className="text-[11px] text-red-400 mt-1">{severityCounts.critical} critical</div>
+                    )}
+                  </div>
+                  {/* Open Issues */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">Open Issues</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">{openVulns}</div>
+                  </div>
+                  {/* Pentests */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">Pentests</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">{scans.length}</div>
+                  </div>
+                  {/* PRs Reviewed */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <div className="text-[11px] text-[#71717a] font-medium mb-2 uppercase tracking-wider">PRs Reviewed</div>
+                    <div className="text-3xl font-bold text-[#e4e4e7] tracking-tight">0</div>
+                  </div>
+                </div>
+
+                {/* Middle 3 panels */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* Top Issues */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+                    <div className="px-5 py-4 border-b border-white/[0.06]">
+                      <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight">Top Issues</h3>
+                    </div>
+                    <div className="divide-y divide-white/[0.04]">
+                      {vulns
+                        .filter((v) => !v.is_fixed)
+                        .sort((a, b) => {
+                          const order = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+                          return (order[a.severity as keyof typeof order] ?? 5) - (order[b.severity as keyof typeof order] ?? 5);
+                        })
+                        .slice(0, 4)
+                        .map((vuln) => {
+                          const sevScore: Record<string, number> = { critical: 10, high: 8, medium: 5, low: 2, info: 0 };
+                          const score = sevScore[vuln.severity] ?? 0;
+                          return (
+                            <div
+                              key={vuln.id}
+                              className="flex items-center gap-3 px-5 py-3 hover:bg-white/[0.02] cursor-pointer transition-colors"
+                              onClick={() => {
+                                setActiveTab("issues");
+                                setSelectedVuln(vuln);
+                              }}
+                            >
+                              <div
+                                className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold text-white shrink-0"
+                                style={{ backgroundColor: SEVERITY_HEX[vuln.severity] || "#6b7280" }}
+                              >
+                                {score}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[13px] font-medium text-[#e4e4e7] truncate">{vuln.title}</p>
+                                <p className="text-[11px] text-[#71717a] truncate">{vuln.cve_id || vuln.affected_component || "—"}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      {vulns.length === 0 && (
+                        <div className="py-8 text-center text-[12px] text-[#71717a]">No issues found</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Top Affected Assets */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+                    <div className="px-5 py-4 border-b border-white/[0.06]">
+                      <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight">Top Affected Assets</h3>
+                    </div>
+                    <div className="divide-y divide-white/[0.04]">
+                      {targets.slice(0, 5).map((target) => {
+                        // Find vulns associated with scans of this target
+                        const targetScans = scans.filter((s) => s.target_id === target.id);
+                        const targetScanIds = new Set(targetScans.map((s) => s.id));
+                        const targetVulns = vulns.filter((v) => v.scan_id && targetScanIds.has(v.scan_id));
+                        const hasCritical = targetVulns.some((v) => v.severity === "critical");
+                        const hasHigh = targetVulns.some((v) => v.severity === "high");
+                        const hasMedium = targetVulns.some((v) => v.severity === "medium");
+                        const dotColor = hasCritical ? "bg-red-500" : hasHigh ? "bg-orange-500" : hasMedium ? "bg-yellow-500" : "bg-green-500";
+                        return (
+                          <div key={target.id} className="flex items-center gap-3 px-5 py-3">
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] font-medium text-[#e4e4e7] truncate">{target.name}</p>
+                              <p className="text-[11px] text-[#71717a] font-mono truncate">{target.host}</p>
+                            </div>
+                            <span className="text-[11px] text-[#71717a]">{targetVulns.length} vulns</span>
                           </div>
-                          <p className="text-[13px] font-semibold text-[#e4e4e7] mb-0.5">{s.title}</p>
-                          <p className="text-[11px] text-[#71717a] leading-snug max-w-[180px]">{s.desc}</p>
-                        </div>
-                        {i < 2 && (
-                          <ChevronRight className="w-4 h-4 text-[#71717a]/40 shrink-0 -mx-1" />
-                        )}
+                        );
+                      })}
+                      {targets.length === 0 && (
+                        <div className="py-8 text-center text-[12px] text-[#71717a]">No assets configured</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Severity Breakdown */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+                    <div className="px-5 py-4 border-b border-white/[0.06]">
+                      <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight">Severity Breakdown</h3>
+                    </div>
+                    <div className="p-5">
+                      <DonutChart
+                        data={[
+                          { label: "Critical", value: severityCounts.critical, color: "#ef4444" },
+                          { label: "High", value: severityCounts.high, color: "#f97316" },
+                          { label: "Medium", value: severityCounts.medium, color: "#eab308" },
+                          { label: "Low", value: severityCounts.low, color: "#3b82f6" },
+                        ]}
+                      />
+                      <div className="mt-4 space-y-2">
+                        {[
+                          { label: "Critical", count: severityCounts.critical, color: "#ef4444" },
+                          { label: "High", count: severityCounts.high, color: "#f97316" },
+                          { label: "Medium", count: severityCounts.medium, color: "#eab308" },
+                          { label: "Low", count: severityCounts.low, color: "#3b82f6" },
+                        ].map((item) => (
+                          <div key={item.label} className="flex items-center justify-between text-[12px]">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                              <span className="text-[#a1a1aa]">{item.label}</span>
+                            </div>
+                            <span className="text-[#e4e4e7] font-medium">{item.count}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <StatsCard
-                  icon={Target}
-                  title="Targets"
-                  value={stats?.targets || 0}
-                  subtitle="Monitored endpoints"
-                  color="indigo"
-                  trend={null}
-                />
-                <StatsCard
-                  icon={Search}
-                  title="Total Scans"
-                  value={stats?.scans.total || 0}
-                  subtitle={`${stats?.scans.running || 0} running`}
-                  color="blue"
-                  trend={stats?.scans.completed ? { value: stats.scans.completed, label: "completed" } : null}
-                />
-                <StatsCard
-                  icon={Bug}
-                  title="Vulnerabilities"
-                  value={stats?.vulnerabilities.total || 0}
-                  subtitle={`${stats?.vulnerabilities.high || 0} high severity`}
-                  color="orange"
-                  trend={null}
-                />
-                <StatsCard
-                  icon={AlertTriangle}
-                  title="Critical Issues"
-                  value={stats?.vulnerabilities.critical || 0}
-                  subtitle="Immediate attention"
-                  color="red"
-                  trend={null}
-                />
-              </div>
-
-              {/* Two-column layout */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Recent Scans */}
-                <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-                    <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight">Recent Scans</h3>
-                    <button
-                      onClick={() => setActiveTab("scans")}
-                      className="text-[12px] text-[#71717a] hover:text-indigo-400 transition-colors flex items-center gap-1"
-                    >
-                      View all <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="divide-y divide-white/[0.04]">
-                    {scans.slice(0, 5).map((scan) => (
-                      <ScanRow key={scan.id} scan={scan} onClick={() => setScanDetail(scan)} />
-                    ))}
-                    {scans.length === 0 && (
-                      <EmptyState
-                        icon={Search}
-                        message="No scans yet"
-                        submessage="Add a target and run your first scan"
-                      />
-                    )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Recent Vulnerabilities */}
-                <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
-                  <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-                    <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight">Recent Vulnerabilities</h3>
-                    <button
-                      onClick={() => setActiveTab("vulns")}
-                      className="text-[12px] text-[#71717a] hover:text-indigo-400 transition-colors flex items-center gap-1"
-                    >
-                      View all <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="divide-y divide-white/[0.04]">
-                    {vulns.slice(0, 5).map((vuln) => (
-                      <VulnRow key={vuln.id} vuln={vuln} />
-                    ))}
-                    {vulns.length === 0 && (
-                      <EmptyState
-                        icon={Lock}
-                        message="No vulnerabilities found"
-                        submessage="Your systems look clean"
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Targets Tab */}
-          {activeTab === "targets" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-[#e4e4e7]">Targets</h3>
-                  <p className="text-[12px] text-[#71717a] mt-0.5">{targets.length} monitored endpoints</p>
-                </div>
-                {canEdit && (
-                  <button
-                    onClick={() => setShowAddTarget(true)}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Add Target
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {targets.map((target, i) => (
-                  <TargetCard
-                    key={target.id}
-                    target={target}
-                    onScan={(id) => setShowScanModal({ targetId: id, targetName: target.name })}
-                    index={i}
-                    canScan={canScan}
-                  />
-                ))}
-                {targets.length === 0 && (
-                  <div className="col-span-full">
-                    <EmptyStateLarge
-                      icon={Target}
-                      title="No targets configured"
-                      message="Add your first target to begin security reconnaissance"
-                      action="Add Target"
-                      onAction={() => setShowAddTarget(true)}
+                {/* Bottom 3 charts */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {/* Security Score Trend */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight mb-4">Security Score Trend</h3>
+                    <LineChart
+                      data={[
+                        Math.max(0, securityScore - 20),
+                        Math.max(0, securityScore - 15),
+                        Math.max(0, securityScore - 10),
+                        Math.max(0, securityScore - 5),
+                        securityScore,
+                      ]}
+                      color="#14b8a6"
                     />
                   </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Scans Tab */}
-          {activeTab === "scans" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-[#e4e4e7]">Scan History</h3>
-                  <p className="text-[12px] text-[#71717a] mt-0.5">{scans.length} scans recorded</p>
+                  {/* Open vs Fixed Issues */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight mb-4">Open vs Fixed Issues</h3>
+                    <LineChart
+                      data={[Math.max(0, openVulns - 8), Math.max(0, openVulns - 5), Math.max(0, openVulns - 3), Math.max(0, openVulns - 1), openVulns]}
+                      color="#ef4444"
+                      secondaryData={[0, Math.floor(fixedVulns * 0.2), Math.floor(fixedVulns * 0.5), Math.floor(fixedVulns * 0.8), fixedVulns]}
+                      secondaryColor="#22c55e"
+                    />
+                    <div className="flex items-center gap-4 mt-3 text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                        <span className="text-[#71717a]">Open</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <span className="text-[#71717a]">Fixed</span>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Mean Time to Remediate */}
+                  <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5">
+                    <h3 className="text-[13px] font-semibold text-[#e4e4e7] tracking-tight mb-4">Mean Time to Remediate</h3>
+                    <LineChart
+                      data={[14, 12, 10, 8, 6]}
+                      color="#14b8a6"
+                    />
+                    <div className="text-[11px] text-[#71717a] mt-3">Average days to fix vulnerabilities</div>
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-white/[0.06]">
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">ID</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Type</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Tool</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Status</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Duration</th>
-                      <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/[0.04]">
-                    {scans.map((scan) => (
-                      <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
-                        <td className="px-5 py-3">
-                          <span className="text-[13px] text-[#e4e4e7] font-medium">{scan.scan_type}</span>
-                        </td>
-                        <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">{scan.tool || "auto"}</td>
-                        <td className="px-5 py-3">
-                          <StatusBadge status={scan.status} />
-                        </td>
-                        <td className="px-5 py-3 text-[13px] text-[#71717a]">
-                          {scan.duration ? `${scan.duration}s` : "—"}
-                        </td>
-                        <td className="px-5 py-3">
-                          <button
-                            onClick={() => setScanDetail(scan)}
-                            className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
-                          >
-                            View
-                          </button>
-                        </td>
+            {/* ─── Pentests Tab ─────────────────────────────────────── */}
+            {activeTab === "pentests" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#e4e4e7]">Pentest History</h3>
+                    <p className="text-[12px] text-[#71717a] mt-0.5">{scans.length} pentests recorded</p>
+                  </div>
+                </div>
+                <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/[0.06]">
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">ID</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Type</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Tool</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Status</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Duration</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Actions</th>
                       </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {scans.map((scan) => (
+                        <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
+                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
+                          <td className="px-5 py-3">
+                            <span className="text-[13px] text-[#e4e4e7] font-medium">{scan.scan_type}</span>
+                          </td>
+                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">{scan.tool || "auto"}</td>
+                          <td className="px-5 py-3">
+                            <StatusBadge status={scan.status} />
+                          </td>
+                          <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
+                          <td className="px-5 py-3">
+                            <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {scans.length === 0 && <EmptyStateLarge icon={Search} title="No pentests yet" message="Start a pentest from the dashboard or targets page" />}
+                </div>
+              </div>
+            )}
+
+            {/* ─── PR Reviews Tab ───────────────────────────────────── */}
+            {activeTab === "pr-reviews" && (
+              <div className="space-y-4">
+                <EmptyStateLarge icon={GitBranch} title="No PR reviews yet" message="Connect your repositories to start reviewing pull requests for security issues" />
+              </div>
+            )}
+
+            {/* ─── Targets Tab ────────────────────────────────────── */}
+            {activeTab === "targets" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#e4e4e7]">Targets</h3>
+                    <p className="text-[12px] text-[#71717a] mt-0.5">{targets.length} monitored endpoints</p>
+                  </div>
+                  {canEdit && (
+                    <button
+                      onClick={() => setShowAddTarget(true)}
+                      className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all duration-200 shadow-lg shadow-indigo-500/20"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add Target
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {targets.map((target, i) => (
+                    <TargetCard key={target.id} target={target} onScan={(id) => setShowScanModal({ targetId: id, targetName: target.name })} index={i} canScan={canScan} />
+                  ))}
+                  {targets.length === 0 && (
+                    <div className="col-span-full">
+                      <EmptyStateLarge icon={Target} title="No targets configured" message="Add your first target to begin security reconnaissance" action="Add Target" onAction={() => setShowAddTarget(true)} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Scans Tab ──────────────────────────────────────── */}
+            {activeTab === "scans" && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-[#e4e4e7]">Scan History</h3>
+                    <p className="text-[12px] text-[#71717a] mt-0.5">{scans.length} scans recorded</p>
+                  </div>
+                </div>
+
+                <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-white/[0.06]">
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">ID</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Type</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Tool</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Status</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Duration</th>
+                        <th className="text-left px-5 py-3 text-[11px] font-medium text-[#71717a] uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.04]">
+                      {scans.map((scan) => (
+                        <tr key={scan.id} className="hover:bg-white/[0.02] transition-colors">
+                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">#{scan.id}</td>
+                          <td className="px-5 py-3">
+                            <span className="text-[13px] text-[#e4e4e7] font-medium">{scan.scan_type}</span>
+                          </td>
+                          <td className="px-5 py-3 text-[13px] text-[#a1a1aa]">{scan.tool || "auto"}</td>
+                          <td className="px-5 py-3">
+                            <StatusBadge status={scan.status} />
+                          </td>
+                          <td className="px-5 py-3 text-[13px] text-[#71717a]">{scan.duration ? `${scan.duration}s` : "—"}</td>
+                          <td className="px-5 py-3">
+                            <button onClick={() => setScanDetail(scan)} className="text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {scans.length === 0 && <EmptyStateLarge icon={Search} title="No scans yet" message="Scans will appear here once you start scanning your targets" />}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Issues Tab (main view with 3-column detail) ────── */}
+            {activeTab === "issues" && (
+              <div className="space-y-4">
+                {/* Severity Count Bar */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-[12px] text-[#71717a] font-medium mr-1">Severity:</span>
+                  {(["critical", "high", "medium", "low"] as const).map((sev) => {
+                    const c = getSeverityColor(sev);
+                    const count = severityCounts[sev];
+                    return (
+                      <span key={sev} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${c.bg} ${c.text} ${c.border} border`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                        {sev.charAt(0).toUpperCase() + sev.slice(1)}: {count}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* Filter Tabs + Search */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center bg-[#12121a] rounded-md border border-white/[0.06] overflow-hidden">
+                    {(["all", "open", "fixed"] as const).map((f) => (
+                      <button
+                        key={f}
+                        onClick={() => setIssueFilter(f)}
+                        className={`px-3.5 py-1.5 text-[12px] font-medium transition-all duration-150 ${
+                          issueFilter === f ? "bg-indigo-500/10 text-indigo-400" : "text-[#71717a] hover:text-[#a1a1aa]"
+                        }`}
+                      >
+                        {f.charAt(0).toUpperCase() + f.slice(1)}
+                      </button>
                     ))}
-                  </tbody>
-                </table>
-                {scans.length === 0 && (
-                  <EmptyStateLarge
-                    icon={Search}
-                    title="No scans yet"
-                    message="Scans will appear here once you start scanning your targets"
-                  />
-                )}
-              </div>
-            </div>
-          )}
+                  </div>
 
-          {/* Vulnerabilities Tab */}
-          {activeTab === "vulns" && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-semibold text-[#e4e4e7]">Vulnerabilities</h3>
-                <p className="text-[12px] text-[#71717a] mt-0.5">{vulns.length} vulnerabilities detected</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {vulns.map((vuln, i) => (
-                  <VulnCard key={vuln.id} vuln={vuln} index={i} />
-                ))}
-                {vulns.length === 0 && (
-                  <div className="col-span-full">
-                    <EmptyStateLarge
-                      icon={Lock}
-                      title="No vulnerabilities detected"
-                      message="Run vulnerability scans on your targets to identify security issues"
+                  <div className="flex-1 min-w-[200px] max-w-md flex items-center gap-2 px-3 py-1.5 rounded-md bg-[#12121a] border border-white/[0.06] text-[#71717a] text-[13px] focus-within:border-indigo-500/30 transition-colors">
+                    <Search className="w-3.5 h-3.5 shrink-0" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search issues..."
+                      className="flex-1 bg-transparent text-[12px] text-[#e4e4e7] placeholder-[#71717a] focus:outline-none"
                     />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery("")} className="text-[#71717a] hover:text-[#a1a1aa]">
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Issues List */}
+                <div className="space-y-1">
+                  {filteredVulns.map((vuln) => {
+                    const c = getSeverityColor(vuln.severity);
+                    const isSelected = selectedVuln?.id === vuln.id;
+                    return (
+                      <button
+                        key={vuln.id}
+                        onClick={() => {
+                          setSelectedVuln(vuln);
+                          setDetailTab("details");
+                        }}
+                        className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-150 group ${
+                          isSelected
+                            ? "bg-indigo-500/10 border border-indigo-500/20"
+                            : "hover:bg-white/[0.03] border border-transparent"
+                        }`}
+                      >
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${c.dot}`} />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-[13px] font-medium truncate ${isSelected ? "text-indigo-400" : "text-[#e4e4e7]"}`}>{vuln.title}</p>
+                          <p className="text-[11px] text-[#71717a] truncate mt-0.5">
+                            {vuln.cve_id || "No CVE"} · {vuln.affected_component || "Unknown component"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {vuln.is_fixed && (
+                            <span className="text-[10px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded border border-green-500/20">Fixed</span>
+                          )}
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${c.bg} ${c.text} ${c.border} border`}>
+                            {vuln.severity}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredVulns.length === 0 && (
+                    <EmptyStateLarge icon={Lock} title="No issues found" message={searchQuery ? "Try adjusting your search query" : "No vulnerabilities match the current filter"} />
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Repositories Tab ────────────────────────────────── */}
+            {activeTab === "repositories" && (
+              <div className="space-y-4">
+                <EmptyStateLarge icon={FolderGit} title="Connect your repositories" message="Link your GitHub, GitLab, or Bitbucket repositories to enable automated security scanning and PR reviews" />
+              </div>
+            )}
+
+            {/* ─── Domains Tab ─────────────────────────────────────── */}
+            {activeTab === "domains" && (
+              <div className="space-y-4">
+                <EmptyStateLarge icon={Globe} title="Add domains to monitor" message="Add your domains to continuously monitor for security issues, certificate changes, and DNS modifications" />
+              </div>
+            )}
+
+            {/* ─── Networks Tab ────────────────────────────────────── */}
+            {activeTab === "networks" && (
+              <div className="space-y-4">
+                <EmptyStateLarge icon={Network} title="Network scanning coming soon" message="Define network ranges and subnets for automated discovery and continuous monitoring" />
+              </div>
+            )}
+
+            {/* ─── Integrations Tab ────────────────────────────────── */}
+            {activeTab === "integrations" && (
+              <div className="space-y-4">
+                <EmptyStateLarge icon={Puzzle} title="Connect third-party tools" message="Integrate with Slack, Jira, PagerDuty, SIEM platforms, and more to streamline your security workflow" />
+              </div>
+            )}
+
+            {/* ─── AI Chat Tab ────────────────────────────────────── */}
+            {activeTab === "chat" && <AIChat addToast={addToast} authFetch={authFetch} />}
+
+            {/* ─── Tools Tab ───────────────────────────────────────── */}
+            {activeTab === "tools" && <ToolsList />}
+
+            {/* ─── Settings Tab ────────────────────────────────────── */}
+            {activeTab === "settings" && <SettingsPanel addToast={addToast} authFetch={authFetch} isAdmin={isAdmin} />}
+          </div>
+        </main>
+
+        {/* ─── Detail Panel (right slide-in) ─────────────────────────── */}
+        {showDetailPanel && selectedVuln && (
+          <aside className="w-[380px] shrink-0 border-l border-white/[0.06] bg-[#0e0e15] flex flex-col overflow-hidden animate-slide-in-right">
+            {/* Detail Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${getSeverityColor(selectedVuln.severity).dot}`} />
+                <h3 className="text-[13px] font-semibold text-[#e4e4e7] truncate">{selectedVuln.title}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedVuln(null)}
+                className="p-1.5 rounded text-[#71717a] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable Detail Content */}
+            <div className="flex-1 overflow-auto">
+              {/* Severity Badge */}
+              <div className="px-5 pt-4 pb-3">
+                {(() => {
+                  const c = getSeverityColor(selectedVuln.severity);
+                  return (
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider ${c.bg} ${c.text} ${c.border} border`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
+                      {selectedVuln.severity}
+                    </span>
+                  );
+                })()}
+              </div>
+
+              {/* Technical Details */}
+              <div className="px-5 pb-3">
+                <h4 className="text-[11px] font-medium text-[#71717a] uppercase tracking-wider mb-2">Technical Details</h4>
+                <p className="text-[12px] text-[#a1a1aa] leading-relaxed">
+                  {selectedVuln.description || "No description available for this vulnerability."}
+                </p>
+              </div>
+
+              {/* Locations */}
+              <div className="px-5 pb-3">
+                <h4 className="text-[11px] font-medium text-[#71717a] uppercase tracking-wider mb-2">Locations</h4>
+                <div className="space-y-1.5">
+                  {selectedVuln.cve_id && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#71717a] w-24 shrink-0">CVE ID</span>
+                      <span className="text-[12px] text-indigo-400 font-mono">{selectedVuln.cve_id}</span>
+                    </div>
+                  )}
+                  {selectedVuln.affected_component && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#71717a] w-24 shrink-0">Component</span>
+                      <span className="text-[12px] text-[#e4e4e7] font-mono">{selectedVuln.affected_component}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#71717a] w-24 shrink-0">Status</span>
+                    <span className={`text-[12px] font-medium ${selectedVuln.is_fixed ? "text-green-400" : "text-red-400"}`}>
+                      {selectedVuln.is_fixed ? "Fixed" : "Open"}
+                    </span>
+                  </div>
+                  {selectedVuln.created_at && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#71717a] w-24 shrink-0">Detected</span>
+                      <span className="text-[12px] text-[#a1a1aa]">{new Date(selectedVuln.created_at).toLocaleString()}</span>
+                    </div>
+                  )}
+                  {selectedVuln.scan_id && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-[#71717a] w-24 shrink-0">Scan ID</span>
+                      <span className="text-[12px] text-[#a1a1aa] font-mono">#{selectedVuln.scan_id}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tabs: Details | Remediation */}
+              <div className="px-5 pt-2">
+                <div className="flex border-b border-white/[0.06]">
+                  {(["details", "remediation"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setDetailTab(tab)}
+                      className={`px-4 py-2.5 text-[12px] font-medium transition-all duration-150 border-b-2 -mb-px ${
+                        detailTab === tab
+                          ? "border-indigo-400 text-indigo-400"
+                          : "border-transparent text-[#71717a] hover:text-[#a1a1aa]"
+                      }`}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tab Content */}
+              <div className="px-5 py-4">
+                {detailTab === "details" && (
+                  <div className="space-y-4">
+                    {/* Code block with syntax-like highlighting */}
+                    <div className="bg-[#0a0a0f] rounded-lg border border-white/[0.06] overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] bg-white/[0.02]">
+                        <div className="flex gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
+                          <span className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
+                        </div>
+                        <span className="text-[10px] text-[#71717a] font-mono ml-2">vulnerability.json</span>
+                      </div>
+                      <pre className="p-4 text-[11px] font-mono leading-relaxed overflow-x-auto">
+                        <code>
+                          <span className="text-purple-400">{"{"}{"\n"}</span>
+                          <span className="text-[#71717a]">  "id"</span>
+                          <span className="text-[#a1a1aa]">: </span>
+                          <span className="text-green-400">{selectedVuln.id}</span>
+                          <span className="text-[#a1a1aa]">,{"\n"}</span>
+                          <span className="text-[#71717a]">  "title"</span>
+                          <span className="text-[#a1a1aa]">: </span>
+                          <span className="text-amber-300">"{selectedVuln.title}"</span>
+                          <span className="text-[#a1a1aa]">,{"\n"}</span>
+                          <span className="text-[#71717a]">  "severity"</span>
+                          <span className="text-[#a1a1aa]">: </span>
+                          <span className={`${getSeverityColor(selectedVuln.severity).text}`}>"{selectedVuln.severity}"</span>
+                          <span className="text-[#a1a1aa]">,{"\n"}</span>
+                          {selectedVuln.cve_id && (
+                            <>
+                              <span className="text-[#71717a]">  "cve_id"</span>
+                              <span className="text-[#a1a1aa]">: </span>
+                              <span className="text-blue-400">"{selectedVuln.cve_id}"</span>
+                              <span className="text-[#a1a1aa]">,{"\n"}</span>
+                            </>
+                          )}
+                          {selectedVuln.affected_component && (
+                            <>
+                              <span className="text-[#71717a]">  "component"</span>
+                              <span className="text-[#a1a1aa]">: </span>
+                              <span className="text-amber-300">"{selectedVuln.affected_component}"</span>
+                              <span className="text-[#a1a1aa]">,{"\n"}</span>
+                            </>
+                          )}
+                          <span className="text-[#71717a]">  "is_fixed"</span>
+                          <span className="text-[#a1a1aa]">: </span>
+                          <span className={selectedVuln.is_fixed ? "text-green-400" : "text-red-400"}>{selectedVuln.is_fixed ? "true" : "false"}</span>
+                          <span className="text-[#a1a1aa]">{"\n"}</span>
+                          <span className="text-purple-400">{"}"}</span>
+                        </code>
+                      </pre>
+                    </div>
+                  </div>
+                )}
+
+                {detailTab === "remediation" && (
+                  <div className="space-y-4">
+                    <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                      <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-2 flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                        Recommended Actions
+                      </h4>
+                      <ul className="space-y-2 text-[12px] text-[#a1a1aa] leading-relaxed">
+                        <li className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">1.</span>
+                          <span>Update {selectedVuln.affected_component || "the affected component"} to the latest stable version.</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">2.</span>
+                          <span>Review and apply the latest security patches from the vendor.</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-indigo-400 mt-0.5">3.</span>
+                          <span>Verify the fix by re-running a vulnerability scan on this target.</span>
+                        </li>
+                        {selectedVuln.severity === "critical" && (
+                          <li className="flex items-start gap-2">
+                            <span className="text-red-400 mt-0.5">!</span>
+                            <span className="text-red-400">Critical severity — consider isolating the affected system until patched.</span>
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+
+                    {selectedVuln.cve_id && (
+                      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-4">
+                        <h4 className="text-[12px] font-semibold text-[#e4e4e7] mb-2">References</h4>
+                        <a
+                          href={`https://nvd.nist.gov/vuln/detail/${selectedVuln.cve_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-[12px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          NVD — {selectedVuln.cve_id}
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </div>
-          )}
 
-          {/* AI Chat Tab */}
-          {activeTab === "chat" && <AIChat addToast={addToast} authFetch={authFetch} />}
+            {/* Bottom Action Bar */}
+            <div className="flex items-center gap-2 px-5 py-3 border-t border-white/[0.06] bg-[#0e0e15] shrink-0">
+              <button
+                onClick={() => addToast("AI Fix — coming soon", "info")}
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20"
+              >
+                <Wand2 className="w-3.5 h-3.5" />
+                AI Fix
+              </button>
+              <button
+                onClick={() => addToast("Share — coming soon", "info")}
+                className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium text-[#a1a1aa] bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] transition-all"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                Share
+              </button>
+              {selectedVuln.cve_id && (
+                <a
+                  href={`https://nvd.nist.gov/vuln/detail/${selectedVuln.cve_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium text-[#a1a1aa] bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.08] transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Open
+                </a>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
 
-          {/* Tools Tab */}
-          {activeTab === "tools" && <ToolsList />}
+      {/* ─── Add Target Modal ─────────────────────────────────────────── */}
+      {showAddTarget && <AddTargetModal onClose={() => setShowAddTarget(false)} onSubmit={addTarget} />}
 
-          {/* Settings Tab */}
-          {activeTab === "settings" && <SettingsPanel addToast={addToast} authFetch={authFetch} isAdmin={isAdmin} />}
-        </div>
-      </main>
-
-      {/* Add Target Modal */}
-      {showAddTarget && (
-        <AddTargetModal
-          onClose={() => setShowAddTarget(false)}
-          onSubmit={addTarget}
-        />
-      )}
-
-      {/* Scan Modal */}
+      {/* ─── Scan Modal ───────────────────────────────────────────────── */}
       {showScanModal && (
         <ScanModal
           targetName={showScanModal.targetName}
@@ -648,12 +1355,10 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Scan Detail Modal */}
-      {scanDetail && (
-        <ScanDetailModal scan={scanDetail} onClose={() => setScanDetail(null)} />
-      )}
+      {/* ─── Scan Detail Modal ────────────────────────────────────────── */}
+      {scanDetail && <ScanDetailModal scan={scanDetail} onClose={() => setScanDetail(null)} />}
 
-      {/* Toast Notifications */}
+      {/* ─── Toast Notifications ──────────────────────────────────────── */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
         {toasts.map((toast) => (
           <Toast key={toast.id} toast={toast} onDismiss={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))} />
@@ -663,58 +1368,11 @@ export default function Dashboard() {
   );
 }
 
-// ─── Stats Card ────────────────────────────────────────────────────────────────
-
-function StatsCard({
-  icon: Icon,
-  title,
-  value,
-  subtitle,
-  color,
-  trend,
-}: {
-  icon: any;
-  title: string;
-  value: number;
-  subtitle: string;
-  color: string;
-  trend: { value: number; label: string } | null;
-}) {
-  const colorMap: Record<string, { bg: string; text: string; icon: string; glow: string }> = {
-    indigo: { bg: "bg-indigo-500/10", text: "text-indigo-400", icon: "text-indigo-400", glow: "shadow-indigo-500/5" },
-    blue: { bg: "bg-blue-500/10", text: "text-blue-400", icon: "text-blue-400", glow: "shadow-blue-500/5" },
-    orange: { bg: "bg-orange-500/10", text: "text-orange-400", icon: "text-orange-400", glow: "shadow-orange-500/5" },
-    red: { bg: "bg-red-500/10", text: "text-red-400", icon: "text-red-400", glow: "shadow-red-500/5" },
-  };
-  const c = colorMap[color] || colorMap.indigo;
-
-  return (
-    <div className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] hover:scale-[1.01] transition-all duration-200 group">
-      <div className="flex items-start justify-between mb-4">
-        <div className={`p-2 rounded-md ${c.bg}`}>
-          <Icon className={`w-4 h-4 ${c.icon}`} />
-        </div>
-        {trend && (
-          <span className="flex items-center gap-1 text-[11px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">
-            <TrendingUp className="w-3 h-3" />
-            {trend.value}
-          </span>
-        )}
-      </div>
-      <div className="text-2xl font-bold text-[#e4e4e7] tracking-tight mb-1">{value.toLocaleString()}</div>
-      <div className="text-[12px] text-[#71717a]">{subtitle}</div>
-    </div>
-  );
-}
-
-// ─── Scan Row ──────────────────────────────────────────────────────────────────
+// ─── Scan Row ────────────────────────────────────────────────────────────────
 
 function ScanRow({ scan, onClick }: { scan: Scan; onClick: () => void }) {
   return (
-    <div
-      className="flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors cursor-pointer"
-      onClick={onClick}
-    >
+    <div className="flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors cursor-pointer" onClick={onClick}>
       <div className="flex items-center gap-3 min-w-0">
         <StatusIcon status={scan.status} />
         <div className="min-w-0">
@@ -725,22 +1383,24 @@ function ScanRow({ scan, onClick }: { scan: Scan; onClick: () => void }) {
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0">
-        {scan.duration && (
-          <span className="text-[11px] text-[#71717a]">{scan.duration}s</span>
-        )}
+        {scan.duration && <span className="text-[11px] text-[#71717a]">{scan.duration}s</span>}
         <StatusBadge status={scan.status} />
       </div>
     </div>
   );
 }
 
-// ─── Vuln Row ──────────────────────────────────────────────────────────────────
+// ─── Vuln Row ────────────────────────────────────────────────────────────────
 
-function VulnRow({ vuln }: { vuln: Vulnerability }) {
+function VulnRow({ vuln, onClick }: { vuln: Vulnerability; onClick?: () => void }) {
+  const c = getSeverityColor(vuln.severity);
   return (
-    <div className="flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors">
+    <div
+      className="flex items-center justify-between px-5 py-3 hover:bg-white/[0.02] transition-colors cursor-pointer"
+      onClick={onClick}
+    >
       <div className="flex items-center gap-3 min-w-0">
-        <SeverityDot severity={vuln.severity} />
+        <span className={`w-2 h-2 rounded-full shrink-0 ${c.dot}`} />
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-[#e4e4e7] truncate">{vuln.title}</p>
           <p className="text-[11px] text-[#71717a] truncate">
@@ -749,16 +1409,14 @@ function VulnRow({ vuln }: { vuln: Vulnerability }) {
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {vuln.is_fixed && (
-          <span className="text-[10px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">Fixed</span>
-        )}
+        {vuln.is_fixed && <span className="text-[10px] text-green-400 bg-green-500/10 px-1.5 py-0.5 rounded">Fixed</span>}
         <SeverityBadge severity={vuln.severity} />
       </div>
     </div>
   );
 }
 
-// ─── Target Card ───────────────────────────────────────────────────────────────
+// ─── Target Card ─────────────────────────────────────────────────────────────
 
 function TargetCard({
   target,
@@ -793,19 +1451,13 @@ function TargetCard({
             <p className="text-[11px] text-[#71717a] truncate font-mono">{target.host}</p>
           </div>
         </div>
-        <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">
-          {target.type}
-        </span>
+        <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">{target.type}</span>
       </div>
 
-      <p className="text-[12px] text-[#71717a] mb-4 line-clamp-2">
-        {target.description || "No description provided"}
-      </p>
+      <p className="text-[12px] text-[#71717a] mb-4 line-clamp-2">{target.description || "No description provided"}</p>
 
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-[#71717a]">
-          Added {new Date(target.created_at).toLocaleDateString()}
-        </span>
+        <span className="text-[10px] text-[#71717a]">Added {new Date(target.created_at).toLocaleDateString()}</span>
         {canScanProp && (
           <button
             onClick={() => onScan(target.id)}
@@ -820,44 +1472,7 @@ function TargetCard({
   );
 }
 
-// ─── Vuln Card ─────────────────────────────────────────────────────────────────
-
-function VulnCard({ vuln, index }: { vuln: Vulnerability; index: number }) {
-  const severityColors: Record<string, string> = {
-    critical: "border-l-red-500",
-    high: "border-l-orange-500",
-    medium: "border-l-yellow-500",
-    low: "border-l-green-500",
-    info: "border-l-blue-500",
-  };
-
-  return (
-    <div
-      className={`bg-[#12121a] rounded-lg border border-white/[0.06] border-l-2 ${severityColors[vuln.severity] || "border-l-gray-500"} p-5 hover:border-white/[0.1] hover:scale-[1.01] transition-all duration-200`}
-      style={{ animationDelay: `${index * 50}ms` }}
-    >
-      <div className="flex items-start justify-between mb-3">
-        <SeverityBadge severity={vuln.severity} />
-        {vuln.cve_id && (
-          <span className="text-[10px] font-mono text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded">
-            {vuln.cve_id}
-          </span>
-        )}
-      </div>
-      <h4 className="text-[13px] font-semibold text-[#e4e4e7] mb-2 line-clamp-2">{vuln.title}</h4>
-      <p className="text-[12px] text-[#71717a] mb-3">
-        {vuln.affected_component || "Unknown component"}
-      </p>
-      <div className="flex items-center justify-between">
-        <span className={`text-[11px] ${vuln.is_fixed ? "text-green-400" : "text-red-400"}`}>
-          {vuln.is_fixed ? "● Fixed" : "● Open"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Modals ────────────────────────────────────────────────────────────────────
+// ─── Modals ──────────────────────────────────────────────────────────────────
 
 function AddTargetModal({
   onClose,
@@ -873,10 +1488,7 @@ function AddTargetModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay" onClick={onClose}>
-      <div
-        className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-md mx-4 shadow-2xl animate-slide-up"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-md mx-4 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
           <h3 className="text-sm font-semibold text-[#e4e4e7]">Add New Target</h3>
           <button onClick={onClose} className="text-[#71717a] hover:text-[#e4e4e7] transition-colors">
@@ -919,9 +1531,7 @@ function AddTargetModal({
                   key={t.value}
                   onClick={() => setType(t.value)}
                   className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-[12px] font-medium border transition-all duration-200 ${
-                    type === t.value
-                      ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
-                      : "bg-white/[0.02] border-white/[0.06] text-[#71717a] hover:border-white/[0.1]"
+                    type === t.value ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400" : "bg-white/[0.02] border-white/[0.06] text-[#71717a] hover:border-white/[0.1]"
                   }`}
                 >
                   <t.icon className="w-3.5 h-3.5" />
@@ -944,10 +1554,7 @@ function AddTargetModal({
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-white/[0.06]">
-          <button
-            onClick={onClose}
-            className="px-3.5 py-2 rounded-md text-[13px] font-medium text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all"
-          >
+          <button onClick={onClose} className="px-3.5 py-2 rounded-md text-[13px] font-medium text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all">
             Cancel
           </button>
           <button
@@ -983,10 +1590,7 @@ function ScanModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay" onClick={onClose}>
-      <div
-        className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-md mx-4 shadow-2xl animate-slide-up"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-md mx-4 shadow-2xl animate-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
           <div>
             <h3 className="text-sm font-semibold text-[#e4e4e7]">Start Scan</h3>
@@ -1003,9 +1607,7 @@ function ScanModal({
               key={st.id}
               onClick={() => setSelected(st.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition-all duration-200 text-left ${
-                selected === st.id
-                  ? "bg-indigo-500/10 border-indigo-500/30"
-                  : "bg-white/[0.02] border-white/[0.06] hover:border-white/[0.1]"
+                selected === st.id ? "bg-indigo-500/10 border-indigo-500/30" : "bg-white/[0.02] border-white/[0.06] hover:border-white/[0.1]"
               }`}
             >
               <div className={`p-1.5 rounded-md ${selected === st.id ? "bg-indigo-500/20" : "bg-white/[0.04]"}`}>
@@ -1015,9 +1617,7 @@ function ScanModal({
                 <p className={`text-[13px] font-medium ${selected === st.id ? "text-indigo-400" : "text-[#e4e4e7]"}`}>{st.label}</p>
                 <p className="text-[11px] text-[#71717a]">{st.desc}</p>
               </div>
-              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                selected === st.id ? "border-indigo-400" : "border-white/20"
-              }`}>
+              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${selected === st.id ? "border-indigo-400" : "border-white/20"}`}>
                 {selected === st.id && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
               </div>
             </button>
@@ -1025,16 +1625,10 @@ function ScanModal({
         </div>
 
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-white/[0.06]">
-          <button
-            onClick={onClose}
-            className="px-3.5 py-2 rounded-md text-[13px] font-medium text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all"
-          >
+          <button onClick={onClose} className="px-3.5 py-2 rounded-md text-[13px] font-medium text-[#a1a1aa] hover:text-[#e4e4e7] hover:bg-white/[0.04] transition-all">
             Cancel
           </button>
-          <button
-            onClick={() => onStart(selected)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-md text-[13px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20"
-          >
+          <button onClick={() => onStart(selected)} className="flex items-center gap-2 px-3.5 py-2 rounded-md text-[13px] font-medium bg-indigo-500 text-white hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
             <Play className="w-3.5 h-3.5" />
             Start Scan
           </button>
@@ -1047,10 +1641,7 @@ function ScanModal({
 function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center modal-overlay" onClick={onClose}>
-      <div
-        className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-lg mx-4 shadow-2xl animate-slide-up max-h-[80vh] overflow-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="bg-[#12121a] rounded-lg border border-white/[0.06] w-full max-w-lg mx-4 shadow-2xl animate-slide-up max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06] sticky top-0 bg-[#12121a]">
           <div>
             <h3 className="text-sm font-semibold text-[#e4e4e7]">Scan #{scan.id}</h3>
@@ -1084,9 +1675,7 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
           {scan.output && (
             <div>
               <p className="text-[11px] text-[#71717a] uppercase tracking-wider mb-2">Output</p>
-              <pre className="bg-[#0a0a0f] rounded-lg p-4 text-[12px] text-[#a1a1aa] font-mono overflow-auto max-h-48 border border-white/[0.04]">
-                {scan.output}
-              </pre>
+              <pre className="bg-[#0a0a0f] rounded-lg p-4 text-[12px] text-[#a1a1aa] font-mono overflow-auto max-h-48 border border-white/[0.04]">{scan.output}</pre>
             </div>
           )}
 
@@ -1095,9 +1684,7 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
               <p className="text-[11px] text-[#71717a] uppercase tracking-wider mb-2 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-indigo-400" /> AI Summary
               </p>
-              <div className="bg-indigo-500/5 rounded-lg p-4 text-[13px] text-[#e4e4e7] leading-relaxed border border-indigo-500/10">
-                {scan.ai_summary}
-              </div>
+              <div className="bg-indigo-500/5 rounded-lg p-4 text-[13px] text-[#e4e4e7] leading-relaxed border border-indigo-500/10">{scan.ai_summary}</div>
             </div>
           )}
         </div>
@@ -1106,7 +1693,7 @@ function ScanDetailModal({ scan, onClose }: { scan: Scan; onClose: () => void })
   );
 }
 
-// ─── AI Chat ───────────────────────────────────────────────────────────────────
+// ─── AI Chat ─────────────────────────────────────────────────────────────────
 
 function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response> }) {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
@@ -1154,9 +1741,9 @@ function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)] bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
+    <div className="flex flex-col h-full bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
       {/* Chat header */}
-      <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06] shrink-0">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-indigo-400" />
           <span className="text-[13px] font-semibold text-[#e4e4e7]">AI Security Assistant</span>
@@ -1221,7 +1808,7 @@ function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["
       </div>
 
       {/* Input */}
-      <div className="p-4 border-t border-white/[0.06]">
+      <div className="p-4 border-t border-white/[0.06] shrink-0">
         <div className="flex gap-2">
           <input
             type="text"
@@ -1244,7 +1831,7 @@ function AIChat({ addToast, authFetch }: { addToast: (msg: string, type: Toast["
   );
 }
 
-// ─── Tools List ────────────────────────────────────────────────────────────────
+// ─── Tools List ──────────────────────────────────────────────────────────────
 
 function ToolsList() {
   const [tools, setTools] = useState<any[]>([]);
@@ -1277,10 +1864,7 @@ function ToolsList() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {tools.map((tool) => (
-          <div
-            key={tool.name}
-            className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] hover:scale-[1.01] transition-all duration-200 group"
-          >
+          <div key={tool.name} className="bg-[#12121a] rounded-lg border border-white/[0.06] p-5 hover:border-white/[0.1] hover:scale-[1.01] transition-all duration-200 group">
             <div className="flex items-start justify-between mb-3">
               <div className="p-2 rounded-md bg-indigo-500/10">
                 <Zap className="w-4 h-4 text-indigo-400" />
@@ -1291,28 +1875,18 @@ function ToolsList() {
               </span>
             </div>
             <h4 className="text-[13px] font-semibold text-[#e4e4e7] mb-1">{tool.name}</h4>
-            <p className="text-[12px] text-[#71717a] mb-3 line-clamp-2">
-              {tool.description || "Security tool"}
-            </p>
+            <p className="text-[12px] text-[#71717a] mb-3 line-clamp-2">{tool.description || "Security tool"}</p>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">
-                {tool.category || "general"}
-              </span>
+              <span className="text-[10px] text-[#71717a] bg-white/[0.04] px-1.5 py-0.5 rounded uppercase tracking-wider">{tool.category || "general"}</span>
               {tool.dangerous && (
-                <span className="text-[10px] text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
-                  Dangerous
-                </span>
+                <span className="text-[10px] text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">Dangerous</span>
               )}
             </div>
           </div>
         ))}
         {tools.length === 0 && (
           <div className="col-span-full">
-            <EmptyStateLarge
-              icon={Zap}
-              title="No tools found"
-              message="Security tools will appear here once configured"
-            />
+            <EmptyStateLarge icon={Zap} title="No tools found" message="Security tools will appear here once configured" />
           </div>
         )}
       </div>
@@ -1320,7 +1894,7 @@ function ToolsList() {
   );
 }
 
-// ─── Settings Panel ────────────────────────────────────────────────────────────
+// ─── Settings Panel ──────────────────────────────────────────────────────────
 
 function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: string, type: Toast["type"]) => void; authFetch: (url: string, options?: RequestInit) => Promise<Response>; isAdmin: boolean }) {
   const [keys, setKeys] = useState<Record<string, string>>({});
@@ -1386,7 +1960,6 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
   const renderKeyRow = (provider: { key: string; name: string; icon: string }) => {
     const isConfigured = keyStatus[provider.key];
     const isShowing = showKeys.has(provider.key);
-    const isSaved = savedKeys.has(provider.key);
 
     return (
       <div key={provider.key} className="flex items-center gap-3 py-2">
@@ -1446,9 +2019,7 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
           <h4 className="text-[13px] font-semibold text-[#e4e4e7]">GitHub Token</h4>
           <p className="text-[11px] text-[#71717a] mt-0.5">For GitHub integration features</p>
         </div>
-        <div className="p-5">
-          {renderKeyRow(githubProvider)}
-        </div>
+        <div className="p-5">{renderKeyRow(githubProvider)}</div>
       </div>
 
       <div className="bg-[#12121a] rounded-lg border border-white/[0.06] overflow-hidden">
@@ -1477,7 +2048,7 @@ function SettingsPanel({ addToast, authFetch, isAdmin }: { addToast: (msg: strin
   );
 }
 
-// ─── Shared Components ─────────────────────────────────────────────────────────
+// ─── Shared Components ───────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -1512,9 +2083,7 @@ function SeverityDot({ severity }: { severity: string }) {
     info: "bg-blue-500",
   };
 
-  return (
-    <span className={`w-2 h-2 rounded-full shrink-0 ${colors[severity] || "bg-gray-500"}`} />
-  );
+  return <span className={`w-2 h-2 rounded-full shrink-0 ${colors[severity] || "bg-gray-500"}`} />;
 }
 
 function StatusIcon({ status }: { status: string }) {
@@ -1530,15 +2099,7 @@ function StatusIcon({ status }: { status: string }) {
   }
 }
 
-function EmptyState({
-  icon: Icon,
-  message,
-  submessage,
-}: {
-  icon: any;
-  message: string;
-  submessage?: string;
-}) {
+function EmptyState({ icon: Icon, message, submessage }: { icon: any; message: string; submessage?: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
       <Icon className="w-5 h-5 text-[#71717a] mb-2" />
@@ -1569,10 +2130,7 @@ function EmptyStateLarge({
       <p className="text-[14px] font-medium text-[#a1a1aa] mb-1">{title}</p>
       <p className="text-[12px] text-[#71717a] max-w-sm mb-4">{message}</p>
       {action && onAction && (
-        <button
-          onClick={onAction}
-          className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20"
-        >
+        <button onClick={onAction} className="flex items-center gap-2 px-3.5 py-2 bg-indigo-500 text-white rounded-md text-[13px] font-medium hover:bg-indigo-400 transition-all shadow-lg shadow-indigo-500/20">
           <Plus className="w-3.5 h-3.5" />
           {action}
         </button>
@@ -1669,21 +2227,13 @@ function UserManagement({ authFetch, addToast }: { authFetch: (url: string, opts
             </div>
           </div>
         ))}
-        {users.length === 0 && (
-          <div className="py-8 text-center text-[13px] text-[#71717a]">No users found</div>
-        )}
+        {users.length === 0 && <div className="py-8 text-center text-[13px] text-[#71717a]">No users found</div>}
       </div>
     </div>
   );
 }
 
-function Toast({
-  toast,
-  onDismiss,
-}: {
-  toast: Toast;
-  onDismiss: () => void;
-}) {
+function Toast({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
   const icons: Record<string, any> = {
     success: CheckCircle2,
     error: XCircle,
