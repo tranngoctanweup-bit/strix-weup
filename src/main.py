@@ -353,7 +353,7 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
             for tool_name, args, label in tools_to_run:
                 log_info(f"Full scan [{scan_id}]: running {label} ({tool_name})", source="scanner", component="full-scan")
                 try:
-                    result = tool_engine.execute(tool_name, args, auto_save)
+                    result = await asyncio.to_thread(tool_engine.execute, tool_name, args, auto_save)
                     if result.output:
                         all_outputs.append(f"═══ {label.upper()} ({tool_name}) ═══\n{result.output}")
                 except Exception as e:
@@ -399,7 +399,7 @@ async def execute_scan(scan_id: int, target: str, scan_type: str, tool: str = No
             else:
                 args = {"target": domain, "domain": domain, "url": url}
             
-            result = tool_engine.execute(tool_name, args, auto_save)
+            result = await asyncio.to_thread(tool_engine.execute, tool_name, args, auto_save)
             
             if result.success:
                 ai_summary = await get_ai_summary(result.output, scan_type, target)
