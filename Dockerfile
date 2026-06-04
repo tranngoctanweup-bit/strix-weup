@@ -32,26 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     unzip \
-    perl \
     && rm -rf /var/lib/apt/lists/*
-
-# Install nikto from GitHub
-RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
-    && ln -s /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
-    && chmod +x /usr/local/bin/nikto
-
-# Install Go-based security tools (nuclei, subfinder, httpx)
-RUN ARCH=$(dpkg --print-architecture) && \
-    if [ "$ARCH" = "arm64" ]; then GOARCH="arm64"; else GOARCH="amd64"; fi && \
-    # nuclei
-    curl -sL "https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_linux_${GOARCH}.zip" -o /tmp/nuclei.zip && \
-    unzip -o /tmp/nuclei.zip -d /tmp && mv /tmp/nuclei /usr/local/bin/nuclei && chmod +x /usr/local/bin/nuclei && rm /tmp/nuclei.zip && \
-    # subfinder
-    curl -sL "https://github.com/projectdiscovery/subfinder/releases/latest/download/subfinder_linux_${GOARCH}.zip" -o /tmp/subfinder.zip && \
-    unzip -o /tmp/subfinder.zip -d /tmp && mv /tmp/subfinder /usr/local/bin/subfinder && chmod +x /usr/local/bin/subfinder && rm /tmp/subfinder.zip && \
-    # httpx
-    curl -sL "https://github.com/projectdiscovery/httpx/releases/latest/download/httpx_linux_${GOARCH}.zip" -o /tmp/httpx.zip && \
-    unzip -o /tmp/httpx.zip -d /tmp && mv /tmp/httpx /usr/local/bin/httpx && chmod +x /usr/local/bin/httpx && rm /tmp/httpx.zip
 
 # Copy installed Python packages from builder
 COPY --from=builder /install /usr/local
